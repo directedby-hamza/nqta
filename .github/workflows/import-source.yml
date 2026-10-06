@@ -1,0 +1,111 @@
+name: Import verified Nqta source
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: nqta-source-import
+  cancel-in-progress: false
+
+jobs:
+  import-source:
+    if: github.repository == 'directedby-hamza/nqta' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          persist-credentials: true
+
+      - name: Validate and import the source archive
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import stat
+          import subprocess
+          import zipfile
+
+          archive = Path('Nqta-Free-Hosting-Source.zip')
+          expected_hash = 'f3326b248b0c7c3222940c05549dece97cc12b4c7c079da2b306abcf4c219668'
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected_hash:
+              raise SystemExit('Source archive SHA-256 does not match.')
+
+          workspace = Path.cwd().resolve()
+          files = {}
+          with zipfile.ZipFile(archive) as source:
+              for entry in source.infolist():
+                  name = entry.filename
+                  if not name.startswith('nqta/') or any(c in name for c in ('\\', '\0', '\n', '\r')):
+                      raise SystemExit('Invalid archive entry path.')
+                  relative = name[len('nqta/'):].removesuffix('/')
+                  if not relative and entry.is_dir():
+                      continue
+                  parts = relative.split('/')
+                  if any(p in ('', '.', '..', '.git') for p in parts) or parts[0] == '.github':
+                      raise SystemExit('Unsafe or workflow-modifying archive entry.')
+                  if any(p.startswith('.env') and p != '.env.example' for p in parts):
+                      raise SystemExit('Environment secret file is forbidden.')
+                  mode = entry.external_attr >> 16
+                  if entry.is_dir():
+                      if stat.S_IFMT(mode) not in (0, stat.S_IFDIR):
+                          raise SystemExit('Invalid archive directory type.')
+                      continue
+                  if stat.S_IFMT(mode) not in (0, stat.S_IFREG) or entry.flag_bits & 1:
+                      raise SystemExit('Archive must contain unencrypted regular files only.')
+                  if relative in files:
+                      raise SystemExit('Duplicate archive file path.')
+                  target = workspace.joinpath(*parts)
+                  if target.is_symlink() or not target.resolve().is_relative_to(workspace):
+                      raise SystemExit('Archive target escapes the repository.')
+                  if entry.file_size > 25 * 1024 * 1024:
+                      raise SystemExit('Source file exceeds the expected size limit.')
+                  files[relative] = (target, source.read(entry), mode & 0o777)
+
+          if len(files) != 96:
+              raise SystemExit('Expected exactly 96 source files.')
+          required = {'package.json', 'package-lock.json', 'render.yaml', 'tsconfig.json', '.env.example'}
+          if not required.issubset(files):
+              raise SystemExit('Required source files are missing.')
+          for relative in files:
+              parts = relative.split('/')
+              if any('/'.join(parts[:i]) in files for i in range(1, len(parts))):
+                  raise SystemExit('Conflicting archive file and directory paths.')
+
+          for target, data, mode in files.values():
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+              target.chmod(mode or 0o644)
+          if any(target.read_bytes() != data for target, data, _ in files.values()):
+              raise SystemExit('Extracted source verification failed.')
+
+          archive.unlink()
+          manifest = Path(os.environ['RUNNER_TEMP']) / 'nqta-import-paths'
+          paths = sorted(files) + [archive.name]
+          manifest.write_bytes(b'\0'.join(path.encode('utf-8') for path in paths) + b'\0')
+          subprocess.run(['git', '--literal-pathspecs', 'add',
+                          '--pathspec-from-file=' + str(manifest), '--pathspec-file-nul'], check=True)
+          if subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--', '.github/']):
+              raise SystemExit('Workflow files must remain unchanged.')
+          print('Imported and verified all 96 source files; removed the source archive.')
+          PY
+
+      - name: Commit and push the imported source
+        shell: bash
+        run: |
+          if git diff --cached --quiet; then
+            echo 'The verified source is already present.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Import complete verified Nqta source'
+          git push origin HEAD:refs/heads/main
