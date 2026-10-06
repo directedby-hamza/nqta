@@ -1,0 +1,19 @@
+# Whole-project review and disposition
+
+A fresh `gpt-6-astra` reviewer read the complete application at `bd5b490`, the approved plan, the specification and execution ledger. This review covered the foundation and UI commits. The reviewer reported no Critical findings, seven Important findings and three Minor findings. Important findings entered one implementation fix pass; no second review was dispatched.
+
+| Important finding                        | Reproduction and fix                                                                                                                                                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Publication differs from reviewed rules  | Stale draft publication succeeded and fields remained editable during a delayed save. Publication now requires the saved revision; editing is disabled while saving.                                                                |
+| Paused-shop recovery denied              | A verified existing member was rejected while paused; the UI hid verification. Existing membership recovery precedes the new-enrolment check, while earning/new members stay blocked. Earned rewards remain redeemable.             |
+| Uncertain operation identifier discarded | Lost responses followed by dialog closure/reload had no recoverable operation. Purchase and redemption payloads are now saved before sending, scoped by shop/staff, and resumed with their original key.                            |
+| Revocation read before lock              | A controlled waiting-lock reproduction authorised a staff member revoked before lock acquisition. The shop lock now precedes the current staff check, within the protected mutation transaction, including invites/profile/support. |
+| Concurrent login limiter exceeded        | Fifteen bad logins all reached credential rejection. An atomic reservation now permits ten and rejects five before credential verification.                                                                                         |
+| Invitation origin rejected               | The generated link used `localhost` instead of the trusted `127.0.0.1` origin. Invitation URLs now use the same canonical origin as mutation validation.                                                                            |
+| Fractional receipt amount rounded        | `2550` minor units displayed as `MAD 26`. Receipts and activity now show exact two-decimal amounts, including `0.01`.                                                                                                               |
+
+Regression tests first failed with the existing behaviour. The updated database/unit suite passed **52/52**. A further interrupted-response check ensures an unclassified server error retains the original operation; only an explicit business rejection resolves it. Browser and build evidence is recorded in [verification results](verification-results.md).
+
+The three Minor findings remain recorded in [the ledger](progress.md): the README SMS-variable mismatch (use `.env.example`), a member-code/detail link missing in support intake, and unnecessary re-verification after a transient join failure. Every item the reviewer declined to judge has an explicit scope ruling and cost in that ledger.
+
+The waiting-lock test deliberately controls the revocation interleaving; it is not a claim that a hosted PostgreSQL concurrency/restore drill has been performed. Real provider and hardware checks remain production/pilot work.

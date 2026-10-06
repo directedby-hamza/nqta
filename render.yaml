@@ -1,0 +1,31 @@
+# Blueprint for the app repository, whose root contains package.json.
+# Use a dedicated Neon Free PostgreSQL database containing synthetic data only.
+services:
+  - type: web
+    name: nqta-test
+    runtime: node
+    plan: free
+    region: frankfurt
+    rootDir: .
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NODE_ENV
+        value: production
+      - key: HOSTED_TEST_MODE
+        value: 'true'
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_URL
+        fromService:
+          type: web
+          name: nqta-test
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: TEST_ACCESS_PASSWORD
+        generateValue: true
