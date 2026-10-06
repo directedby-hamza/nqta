@@ -1,12 +1,39 @@
 # Hosted testing on phone and computer
 
-The deployment configuration is prepared for **Render Free Node hosting + a dedicated Neon Free PostgreSQL database**. This document does not establish that a service is live: use the actual HTTPS URL from a successful Render deployment. Both devices use that same URL and share the saved test database.
+The selected deployment is **Netlify Free hosting + a dedicated Neon Free PostgreSQL database**. Netlify's repository import form is prepared, but deployment and private credential transfer are pending. This document does not establish a live application URL: use the actual HTTPS origin from a successful deployment. Both devices use that same origin and share the saved test database. The existing Render Blueprint is retained as an alternative; its Free service creation is currently blocked by a payment-information requirement. See [deployment status](deployment-status.md).
 
-`HOSTED_TEST_MODE=true` enables synthetic demo sign-in and displays verification codes in the interface. No SMS is sent. `NODE_ENV=production` keeps the production build and secure cookies. The browser first asks for HTTP Basic credentials: username **`nqta`**, password **the private `TEST_ACCESS_PASSWORD` configured on Render**. Staff sign-in inside the app is a separate step. All application routes require this access gate except the exact `/api/health` endpoint, which returns basic process health without opening the database.
+`HOSTED_TEST_MODE=true` enables synthetic demo sign-in and displays verification codes in the interface. No SMS is sent. `NODE_ENV=production` keeps the production build and secure cookies. The browser first asks for HTTP Basic credentials: username **`nqta`**, password **the private `TEST_ACCESS_PASSWORD` configured on the selected host**. Staff sign-in inside the app is a separate step. The application source requires this access gate on all routes except the exact `/api/health` endpoint, which returns basic process health without opening the database. The same gate and secure-session behavior must be verified after the Netlify adapter deployment.
 
 Use invented names, test receipt references, and synthetic phone numbers. Anyone who knows the test access password can enter the demo and use its public sample staff accounts. Keep the password private and rotate it after sharing with testers.
 
-## Deploy the test service
+## Shared application environment
+
+Both hosting options use these six application variables. Keep private values outside Git and transfer them to the selected host only after the pending explicit credential permission is confirmed.
+
+| Variable               | Hosted test value                                         |
+| ---------------------- | --------------------------------------------------------- |
+| `NODE_ENV`             | `production`                                              |
+| `HOSTED_TEST_MODE`     | `true`                                                    |
+| `DATABASE_URL`         | Dedicated Neon test PostgreSQL connection string with TLS |
+| `APP_URL`              | Exact assigned HTTPS origin, with no path or query        |
+| `SESSION_SECRET`       | Random private secret, at least 32 characters             |
+| `TEST_ACCESS_PASSWORD` | Random private password, at least 16 characters           |
+
+## Deploy on Netlify Free: selected host
+
+Netlify permits commercial projects on its no-card Free plan. Current credit-based Free accounts receive **300 monthly credits with a hard limit**. Use this ongoing Free plan without paid upgrades or add-ons. [Netlify Free announcement](https://www.netlify.com/blog/introducing-netlify-free-plan/), [current credit-based pricing](https://docs.netlify.com/manage/accounts-and-billing/billing/billing-for-credit-based-plans/credit-based-pricing-plans/).
+
+1. Import the published `directedby-hamza/nqta` GitHub repository into the **Nqta** Free team. Keep the GitHub app limited to that repository and select branch `main`. Netlify has detected **Next.js**, build command **`npm run build`**, and publish directory **`.next`**. The current import form is ready; it has not been deployed, and no credentials have been entered into Netlify.
+2. Set the build environment **`NODE_VERSION=24.21.0`** and **`NPM_FLAGS=--include=dev`**. The second flag installs the TypeScript and Tailwind build tools when `NODE_ENV=production` is present. [Netlify build dependency configuration](https://docs.netlify.com/build/configure-builds/manage-dependencies/).
+3. Once explicit credential-transfer permission is confirmed, configure the six application variables above for the deployed server runtime. Set `APP_URL` to the project's actual assigned HTTPS origin. If that origin is assigned only during the initial import, update `APP_URL` and redeploy before testing. A local origin, join-page path, or another deploy's origin will fail the application's mutation-origin checks.
+4. Let Netlify apply its automatic **OpenNext adapter** for Next.js. It prepares serverless functions for the app's dynamic pages and route handlers. The application code, HTTP Basic gate, and secure-cookie settings remain unchanged. Compatibility verification with adapter **5.16.2** is pending; no Netlify build or deployment success is claimed. [Next.js on Netlify](https://docs.netlify.com/build/frameworks/framework-setup-guides/nextjs/overview/).
+5. After a successful deployment, verify unauthenticated `/api/health`, password protection on pages/API/static assets, cached browser credentials, and the full phone/computer workflow below. Use the already seeded dedicated Neon database; hosted requests do not seed it again.
+
+Netlify Functions for new Free sites use the default **Ohio (`cmh`)** region. The existing Neon database is in **Singapore**, so expect additional database round-trip latency and measure the hosted workflow response times during QA. Function-region customization is documented for Pro/Enterprise plans; the selected deployment stays Free. [Netlify function configuration](https://docs.netlify.com/build/functions/configuration/).
+
+## Render Blueprint: alternative host
+
+Render Free creation was retried after its GitHub app connection, using only nonsecret configuration, and still returned **HTTP 402 requiring payment information**. No Render service exists. The instructions below describe the retained alternative configuration; they do not establish that the account can provision it without that requirement.
 
 1. Create a new Neon project on the **Free** plan for this test only. Choose a region close to the Render service; the Blueprint uses Frankfurt. In Neon's **Connect** panel, copy the PostgreSQL connection string with its TLS options intact. Use a direct connection for the one-time database setup; the app can use the pooled connection. [Neon connection guide](https://github.com/neondatabase/website/blob/main/content/docs/get-started/connect-neon.md).
 2. Publish this app repository to a Git provider connected to Render. The repository root must contain `package.json` and `render.yaml`. If a different repository wraps the app in an `nqta/` directory, set `rootDir: nqta` and the Blueprint path accordingly.
@@ -16,29 +43,21 @@ Use invented names, test receipt references, and synthetic phone numbers. Anyone
 
 For a service created through the Render API or manually instead of a Blueprint, use these same build/start settings and environment values. Set `APP_URL` to its assigned HTTPS origin after service creation, then deploy with that value before testing. Do not put a local URL or a path such as `/join/morrow` in `APP_URL`.
 
-| Variable               | Hosted test value                                                       |
-| ---------------------- | ----------------------------------------------------------------------- |
-| `NODE_ENV`             | `production`                                                            |
-| `NODE_VERSION`         | `24.21.0`                                                               |
-| `HOSTED_TEST_MODE`     | `true`                                                                  |
-| `DATABASE_URL`         | Dedicated test PostgreSQL connection string with TLS                    |
-| `APP_URL`              | Exact assigned HTTPS origin; Blueprint self-reference supplies it       |
-| `SESSION_SECRET`       | Random secret, at least 32 characters; Blueprint generates it           |
-| `TEST_ACCESS_PASSWORD` | Random private password, at least 16 characters; Blueprint generates it |
+Use the shared application environment above. The Render Blueprint additionally sets `NODE_VERSION=24.21.0`, supplies `APP_URL` through its self-reference, and generates the two private secrets.
 
 `npm run start` binds to `0.0.0.0` and Next.js reads Render's `PORT` environment variable. The health path is `/api/health`. Automatic deployments are off; use **Manual Deploy** for later code updates. [Render web service guide](https://render.com/docs/web-services), [Render Blueprint reference](https://render.com/docs/blueprint-spec).
 
 ## Seed the dedicated database once
 
-Hosted requests do not automatically seed demo data. From a trusted computer, install the pinned dependencies with `npm ci --include=dev`. Create a private `.env.hosted-test` file in the app directory containing the seven variables in the table above, using the assigned HTTPS URL and the same secrets as the service. `.env*` files are ignored by Git except `.env.example`.
+Hosted requests do not automatically seed demo data. The existing dedicated Neon project is already fully seeded; see [deployment status](deployment-status.md) for independent verification. For a fresh, empty test database, install the pinned dependencies from a trusted computer with `npm ci --include=dev`. Create a private `.env.hosted-test` file in the app directory containing the application variables above, using the assigned HTTPS origin and the same secrets as the host. `.env*` files are ignored by Git except `.env.example`.
 
-Check that `DATABASE_URL` selects the dedicated, empty test database, then run the existing `db:seed` script with Node 24:
+Check that `DATABASE_URL` selects the dedicated, empty test database, then run the seed entry point directly with the pinned Node 24 binary and the `tsx` loader:
 
 ```sh
-./node_modules/.bin/node --env-file=.env.hosted-test --run db:seed
+./node_modules/.bin/node --env-file=.env.hosted-test --import tsx src/server/db/seed.ts
 ```
 
-This explicitly runs synthetic seeding with `NODE_ENV=production` and `HOSTED_TEST_MODE=true`. It creates the schema and Morrow Coffee sample workspace; it does not copy your local PGlite records. The seed skips a database that already has a shop, so seed before creating a fresh shop. Keep this CLI operation separate from deployments and other seed runs. Render Free has no dashboard shell or one-off jobs. [Render Free limitations](https://render.com/docs/free).
+Running the entry point in this same process applies the private env file to the seed operation. This explicitly runs synthetic seeding with `NODE_ENV=production` and `HOSTED_TEST_MODE=true`. It creates the schema and Morrow Coffee sample workspace; it does not copy your local PGlite records. The seed skips a database that already has a shop, so seed before creating a fresh shop. Keep this CLI operation separate from deployments and other seed runs. Render Free has no dashboard shell or one-off jobs. [Render Free limitations](https://render.com/docs/free).
 
 ## Test the customer and cashier together
 
@@ -65,10 +84,12 @@ Open the hosted service in the phone's browser and on the computer. HTTPS is req
 - **Refund correction:** as owner, reverse a test purchase in **Activity** with an invented refund reason. Check the stamp is reversed. If the associated reward was already enjoyed, check the reconciliation flag; the app records the correction and does not refund a real payment.
 - **Preferences and requests:** on the phone card, change SMS/WhatsApp preferences, refresh, and confirm they persist. Submit a deletion request and inspect the owner request queue. Deletion and assisted recovery remain review requests in this MVP.
 - **Interrupted confirmation:** if a purchase or redemption response is interrupted, reload the cashier and use **Resume pending confirmation** to resolve that same saved action before creating another receipt. Confirm it appears only once in activity.
-- **Persistence:** reload both devices, sign out/in, and repeat after a Render restart or manual redeploy. Records should remain in Neon. Browser sessions may require sign-in again if you rotate `SESSION_SECRET`.
+- **Persistence:** reload both devices, sign out/in, and repeat after a fresh Netlify function instance or a new deployment; for the alternative Render host, also test a service restart. Records should remain in Neon. Browser sessions may require sign-in again if you rotate `SESSION_SECRET`.
 
 ## Free host behaviour and real launch
 
-Render Free sleeps after 15 minutes without traffic; opening the app again can take about a minute. Its local files disappear on restart, redeploy or sleep, so hosted testing requires PostgreSQL. Free usage allowances can suspend the service or prevent further builds. [Render Free limitations](https://render.com/docs/free).
+Netlify Free's 300 monthly credits cover metered deployments, function compute, traffic, and bandwidth. Monitor usage against the hard limit; no paid recharge is configured. Persistent test records belong in Neon rather than a function's local filesystem. [Current Netlify credit-based pricing](https://docs.netlify.com/manage/accounts-and-billing/billing/billing-for-credit-based-plans/credit-based-pricing-plans/).
+
+For the retained alternative, Render Free sleeps after 15 minutes without traffic; opening the app again can take about a minute. Its local files disappear on restart, redeploy or sleep, so hosted testing requires PostgreSQL. Free usage allowances can suspend the service or prevent further builds. [Render Free limitations](https://render.com/docs/free).
 
 This environment exercises the existing MVP with saved synthetic data and simulated phone verification. It does not test real SMS delivery, billing, POS payments, automated deletion, or other future features. For real merchant use, disable `HOSTED_TEST_MODE`, set `DEMO_MODE=false`, and complete the requirements in [production readiness](production-readiness.md), including `SMS_PROVIDER=twilio`, provider credentials, database concurrency and backup/restore checks. Keep the test database separate from customer data.
