@@ -1,4 +1,6 @@
-name: Import verified Nqta source
+# Snapshot: cf46718266071e6d077982cc9d6ecf3bef95b006 (179 tracked source files).
+# Publish this version only on feat/native-wallet-cards, at .github/workflows/import-source.yml.
+name: Import verified Nqta Wallet source
 
 on:
   workflow_dispatch:
@@ -6,12 +8,12 @@ on:
 permissions: {}
 
 concurrency:
-  group: nqta-source-import
+  group: nqta-wallet-source-import
   cancel-in-progress: false
 
 jobs:
   import-source:
-    if: github.repository == 'directedby-hamza/nqta' && github.ref == 'refs/heads/main'
+    if: github.repository == 'directedby-hamza/nqta' && github.ref == 'refs/heads/feat/native-wallet-cards'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -20,7 +22,7 @@ jobs:
       - name: Check out this repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: main
+          ref: feat/native-wallet-cards
           persist-credentials: true
 
       - name: Validate and import the source archive
@@ -34,12 +36,14 @@ jobs:
           import subprocess
           import zipfile
 
-          archive = Path('Nqta-Free-Hosting-Source.zip')
-          expected_hash = 'f3326b248b0c7c3222940c05549dece97cc12b4c7c079da2b306abcf4c219668'
+          archive = Path('Nqta-Wallet-Source.zip')
+          expected_hash = '5edc119d44b4767b671ad858cd72f29a8ab6aed2deef18fd7ace3809a3e166ea'
           if hashlib.sha256(archive.read_bytes()).hexdigest() != expected_hash:
               raise SystemExit('Source archive SHA-256 does not match.')
 
           workspace = Path.cwd().resolve()
+          helper = workspace / '.github/workflows/import-source.yml'
+          helper_bytes = helper.read_bytes()
           files = {}
           with zipfile.ZipFile(archive) as source:
               for entry in source.infolist():
@@ -64,14 +68,16 @@ jobs:
                   if relative in files:
                       raise SystemExit('Duplicate archive file path.')
                   target = workspace.joinpath(*parts)
-                  if target.is_symlink() or not target.resolve().is_relative_to(workspace):
+                  if any(p.is_symlink() for p in [target, *target.parents] if p.is_relative_to(workspace)):
+                      raise SystemExit('Archive target contains a symbolic link.')
+                  if not target.resolve().is_relative_to(workspace):
                       raise SystemExit('Archive target escapes the repository.')
                   if entry.file_size > 25 * 1024 * 1024:
                       raise SystemExit('Source file exceeds the expected size limit.')
                   files[relative] = (target, source.read(entry), mode & 0o777)
 
-          if len(files) != 96:
-              raise SystemExit('Expected exactly 96 source files.')
+          if len(files) != 179:
+              raise SystemExit('Expected exactly 179 source files.')
           required = {'package.json', 'package-lock.json', 'render.yaml', 'tsconfig.json', '.env.example'}
           if not required.issubset(files):
               raise SystemExit('Required source files are missing.')
@@ -87,6 +93,9 @@ jobs:
           if any(target.read_bytes() != data for target, data, _ in files.values()):
               raise SystemExit('Extracted source verification failed.')
 
+          if helper.read_bytes() != helper_bytes:
+              raise SystemExit('The import workflow must remain unchanged.')
+
           archive.unlink()
           manifest = Path(os.environ['RUNNER_TEMP']) / 'nqta-import-paths'
           paths = sorted(files) + [archive.name]
@@ -95,17 +104,21 @@ jobs:
                           '--pathspec-from-file=' + str(manifest), '--pathspec-file-nul'], check=True)
           if subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--', '.github/']):
               raise SystemExit('Workflow files must remain unchanged.')
-          print('Imported and verified all 96 source files; removed the source archive.')
+          print('Imported and verified all 179 Wallet source files; removed the source archive.')
           PY
 
       - name: Commit and push the imported source
         shell: bash
         run: |
+          if [ "$(git symbolic-ref --short HEAD)" != 'feat/native-wallet-cards' ]; then
+            echo 'Refusing to commit outside the dedicated Wallet branch.' >&2
+            exit 1
+          fi
           if git diff --cached --quiet; then
             echo 'The verified source is already present.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Import complete verified Nqta source'
-          git push origin HEAD:refs/heads/main
+          git commit -m 'Import verified native Wallet source cf467182'
+          git push origin HEAD:refs/heads/feat/native-wallet-cards
