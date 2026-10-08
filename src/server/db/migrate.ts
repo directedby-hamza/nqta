@@ -133,6 +133,14 @@ export const migrations: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS wallet_devices_identifier ON wallet_devices(device_id,pass_id)`,
     ],
   },
+  {
+    version: 5,
+    name: 'membership_declared_contacts',
+    statements: [
+      `ALTER TABLE memberships ADD COLUMN IF NOT EXISTS contact_phone text`,
+      `ALTER TABLE memberships ADD COLUMN IF NOT EXISTS contact_email text`,
+    ],
+  },
 ];
 
 function checksum(migration: Migration) {

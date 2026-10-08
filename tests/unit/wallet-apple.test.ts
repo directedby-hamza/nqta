@@ -70,6 +70,47 @@ it('validates real signatures, matching pass/team identities, keys, validity and
   ).toThrow('Wallet is unavailable');
 });
 
+it('shows a welcome and earned points without losing reward-cycle progress or the cashier QR', async () => {
+  const validated = apple.validateAppleWalletCredentials(certificates.env, [certificates.root]);
+  const asset = await readFile(path.join(process.cwd(), 'public/wallet/icon.png'));
+  const assets = Object.fromEntries(
+    ['icon.png', 'icon@2x.png', 'icon@3x.png', 'logo.png', 'logo@2x.png'].map((name) => [
+      name,
+      asset,
+    ]),
+  );
+  for (const [totalStamps, progress, expectedProgress] of [
+    [0, 0, '0 / 5'],
+    [8, 3, '3 / 5'],
+    [10, 0, '0 / 5'],
+  ] as const) {
+    const pass = JSON.parse(
+      unzipApplePass(
+        apple.buildAppleWalletPass(
+          applePass,
+          { ...appleCard, totalStamps, progress },
+          validated,
+          assets,
+        ),
+      )['pass.json'].toString(),
+    );
+    expect(pass.storeCard.primaryFields[0]).toMatchObject({
+      label: 'POINTS EARNED',
+      value: totalStamps,
+      changeMessage: 'You now have %@ points.',
+    });
+    expect(pass.storeCard.secondaryFields.map((field: { value: unknown }) => field.value)).toEqual(
+      expect.arrayContaining(['Hey, welcome back!', expectedProgress]),
+    );
+    expect(pass.barcodes[0].message).toBe('NQTA-PUBLIC-QR');
+    expect(
+      pass.storeCard.secondaryFields.length + pass.storeCard.auxiliaryFields.length,
+    ).toBeLessThanOrEqual(4);
+    expect(JSON.stringify(pass)).not.toContain('PRIVATE CUSTOMER');
+    expect(JSON.stringify(pass)).not.toContain('+212600000001');
+  }
+});
+
 it('creates a detached PKCS7 signature covering the manifest and every required PNG', async () => {
   const api = apple as unknown as Record<string, (...args: unknown[]) => any>;
   expect(typeof api.buildAppleWalletPass).toBe('function');
@@ -107,7 +148,7 @@ it('creates a detached PKCS7 signature covering the manifest and every required 
     webServiceURL: 'https://wallet.example.test/api/wallet/apple',
     barcodes: [{ format: 'PKBarcodeFormatQR', message: 'NQTA-PUBLIC-QR' }],
   });
-  expect(pass.storeCard.primaryFields[0].value).toBe('3 / 5');
+  expect(pass.storeCard.primaryFields[0].value).toBe(8);
   expect(pass.storeCard.headerFields[0].value).toBe(1);
   expect(pass.authenticationToken).toHaveLength(64);
   const text = files['pass.json'].toString();

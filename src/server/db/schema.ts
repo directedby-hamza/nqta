@@ -69,6 +69,8 @@ export const memberships = pgTable('memberships', {
     .notNull()
     .references(() => customers.id),
   memberCode: text('member_code').notNull().unique(),
+  contactPhone: text('contact_phone'),
+  contactEmail: text('contact_email'),
   status: text('status').notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });

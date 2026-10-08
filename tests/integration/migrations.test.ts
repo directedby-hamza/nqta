@@ -37,7 +37,7 @@ describe('versioned database migrations', () => {
     const before = await db.query(
       'SELECT version,name,checksum,applied_at FROM nqta_schema_migrations ORDER BY version',
     );
-    expect(before.rows).toHaveLength(4);
+    expect(before.rows).toHaveLength(5);
     await migrate(db);
     expect(
       (
@@ -157,6 +157,47 @@ describe('versioned database migrations', () => {
     ).rejects.toThrow();
   });
 
+  it('adds optional shop-specific contacts without changing existing identity or membership data', async () => {
+    await migrate(db, migrations.slice(0, 4));
+    await db.query("INSERT INTO shops(id,slug,name) VALUES('merchant','merchant','Merchant')");
+    await db.query(
+      "INSERT INTO programmes(id,shop_id,threshold,reward_description,eligibility,status) VALUES('programme','merchant',5,'Coffee','Paid receipt','published')",
+    );
+    await db.query(
+      "INSERT INTO customers(id,phone,name) VALUES('customer','+212600001001','Mina')",
+    );
+    await db.query(
+      "INSERT INTO memberships(id,shop_id,programme_id,customer_id,member_code) VALUES('member','merchant','programme','customer','NQ-EXISTING')",
+    );
+    const before = (
+      await db.query('SELECT version,name,checksum FROM nqta_schema_migrations ORDER BY version')
+    ).rows;
+    await migrate(db);
+    const member = (
+      await db.query<{ member: Record<string, unknown> }>(
+        'SELECT to_jsonb(m) AS member FROM memberships m',
+      )
+    ).rows[0].member;
+    expect(member).toMatchObject({
+      id: 'member',
+      customer_id: 'customer',
+      member_code: 'NQ-EXISTING',
+      status: 'active',
+      contact_phone: null,
+      contact_email: null,
+    });
+    expect((await db.query('SELECT phone,name FROM customers')).rows).toEqual([
+      { phone: '+212600001001', name: 'Mina' },
+    ]);
+    expect(
+      (
+        await db.query(
+          'SELECT version,name,checksum FROM nqta_schema_migrations WHERE version<=4 ORDER BY version',
+        )
+      ).rows,
+    ).toEqual(before);
+  });
+
   it('rolls back all schema changes when a later migration statement fails', async () => {
     const plan: Migration[] = [
       {
@@ -264,7 +305,7 @@ describe('versioned database migrations', () => {
     expect(await hasTable('nqta_schema_migrations')).toBe(true);
     expect(
       (await db.query('SELECT version FROM nqta_schema_migrations ORDER BY version')).rows,
-    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }]);
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }]);
   });
 
   it('takes the PostgreSQL transaction lock before any migration DDL', async () => {

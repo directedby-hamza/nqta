@@ -9,6 +9,7 @@ import type { Shop, Programme } from '@/lib/types';
 import { ErrorNotice, Loading, Reveal } from '@/components/ui/primitives';
 import { Logo } from '@/components/layout/merchant-shell';
 import { PasswordAccount, type CustomerAccountMode } from './password-account';
+import { walletDestination } from './wallet-actions';
 export function Join({
   slug,
   initialAccountMode,
@@ -16,7 +17,10 @@ export function Join({
   slug: string;
   initialAccountMode?: CustomerAccountMode;
 }) {
-  const config = useResource<{ authMode: 'verified-contact' | 'recovery-key' }>('public/config');
+  const config = useResource<{
+    authMode: 'verified-contact' | 'recovery-key';
+    wallet?: { apple: boolean; google: boolean };
+  }>('public/config');
   const keyMode = config.data?.authMode === 'recovery-key';
   const { data, error, loading } = useResource<{
     shop: Shop;
@@ -26,6 +30,7 @@ export function Join({
   }>(`public/shop/${encodeURIComponent(slug)}`);
   const router = useRouter();
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [sms, setSms] = useState(false);
   const [whatsapp, setWhatsapp] = useState(false);
@@ -36,12 +41,44 @@ export function Join({
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
-  async function openCard() {
-    const member = await api<{ id: string }>('join', {
-      method: 'POST',
-      body: { programmeId: data?.programme?.id, name, consents: { sms: false, whatsapp: false } },
-    });
-    router.push(`/card/${member.id}?shop=${encodeURIComponent(slug)}`);
+  const [savedMembershipId, setSavedMembershipId] = useState('');
+  const [walletDownloadStarted, setWalletDownloadStarted] = useState(false);
+  const savedCardHref = savedMembershipId
+    ? `/card/${savedMembershipId}?shop=${encodeURIComponent(slug)}`
+    : undefined;
+  async function openCard(saveToAppleWallet?: boolean) {
+    let membershipId = savedMembershipId;
+    if (!membershipId) {
+      const member = await api<{ id: string }>('join', {
+        method: 'POST',
+        body: {
+          programmeId: data?.programme?.id,
+          name,
+          ...(saveToAppleWallet !== undefined && phone && email
+            ? { contacts: { phone: phone.trim(), email: email.trim() } }
+            : {}),
+          consents: { sms: false, whatsapp: false },
+        },
+      });
+      membershipId = member.id;
+      setSavedMembershipId(membershipId);
+    }
+    if (saveToAppleWallet && config.data?.wallet?.apple) {
+      const pass = await api<{ url: string }>('wallet/apple', {
+        method: 'POST',
+        body: { membershipId },
+      });
+      const destination = walletDestination('apple', pass.url, membershipId);
+      setWalletDownloadStarted(true);
+      try {
+        window.location.assign(destination);
+      } catch (error) {
+        setWalletDownloadStarted(false);
+        throw error;
+      }
+      return;
+    }
+    router.push(`/card/${membershipId}?shop=${encodeURIComponent(slug)}`);
   }
   async function request(e: FormEvent) {
     e.preventDefault();
@@ -142,12 +179,31 @@ export function Join({
                   This shop is not accepting enrolments right now. Please check with the team.
                 </div>
               ) : keyMode ? (
-                <PasswordAccount
-                  initialMode={initialAccountMode}
-                  name={name}
-                  onNameChange={setName}
-                  onAuthenticated={openCard}
-                />
+                walletDownloadStarted && savedCardHref ? (
+                  <div className="stack" role="status">
+                    <h3>Your card is ready.</h3>
+                    <p className="subtle">On iPhone, confirm Add in Apple Wallet.</p>
+                    <p className="subtle">
+                      Your loyalty membership is saved. You can also open your card here to see your
+                      points and show its QR at checkout.
+                    </p>
+                    <Link href={savedCardHref} className="button primary wide">
+                      Open my saved card
+                      <ArrowRight size={15} />
+                    </Link>
+                  </div>
+                ) : (
+                  <PasswordAccount
+                    initialMode={initialAccountMode}
+                    name={name}
+                    onNameChange={setName}
+                    onAuthenticated={openCard}
+                    contacts={{ phone, email, onPhoneChange: setPhone, onEmailChange: setEmail }}
+                    enrollmentShop={slug}
+                    saveToAppleWallet={config.data?.wallet?.apple === true}
+                    savedCardHref={savedCardHref}
+                  />
+                )
               ) : !challenge ? (
                 <form onSubmit={request}>
                   <div className="field">
@@ -280,7 +336,7 @@ export function Join({
                   )}
                   <p>
                     {keyMode
-                      ? 'We keep your account identifier, optional name, and loyalty activity to run this shop’s programme. You can request deletion from your card settings.'
+                      ? 'We keep your account identifier, optional name, declared phone and email, and loyalty activity to run this shop’s programme. Your contact details are not verified, and do not authorize promotional messages. You can request deletion from your card settings.'
                       : 'We keep your verified phone, optional name, and loyalty activity to run this shop’s programme. Promotional choices are separate. You can withdraw them or request deletion from your card settings.'}{' '}
                     A shop owner reviews deletion requests and any records that need retention.
                   </p>

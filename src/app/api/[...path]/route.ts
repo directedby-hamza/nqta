@@ -2,7 +2,7 @@ import { after, NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDatabase } from '@/server/db/client';
 import { createAuthService } from '@/server/auth/staff';
-import { createCustomerService } from '@/server/auth/customer';
+import { createCustomerService, joinContactsSchema } from '@/server/auth/customer';
 import {
   createCustomerPasswordService,
   CustomerCredentialError,
@@ -431,7 +431,12 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
     }
     if (route === 'join' && method === 'POST') {
       const input = z
-        .object({ programmeId: text, name: z.string().max(100), consents: consent })
+        .object({
+          programmeId: text,
+          name: z.string().max(100),
+          consents: consent,
+          contacts: joinContactsSchema.optional(),
+        })
         .parse(body);
       return json(
         await customers.joinProgramme(
@@ -439,6 +444,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
           input.programmeId,
           input.name,
           input.consents,
+          input.contacts,
         ),
       );
     }

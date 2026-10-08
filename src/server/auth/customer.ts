@@ -1,6 +1,7 @@
 import type { Database } from '../db/client';
 import type { MembershipCard } from '../loyalty/types';
 import { randomBytes, randomInt } from 'node:crypto';
+import { z } from 'zod';
 import { hashCode, hashToken, id, token } from './crypto';
 import { readMembership } from '../loyalty/membership';
 import { deliverVerification, VerificationDeliveryError } from '../providers/verification';
@@ -15,6 +16,13 @@ export function normalisePhone(value: string) {
     throw new Error('Use a phone number with its country code, for example +212600000001.');
   return phone;
 }
+// Shop contact details are customer declarations. They never establish account ownership
+// or populate the verified-contact identity in customers.phone.
+export const joinContactsSchema = z.object({
+  phone: z.string().max(100).transform(normalisePhone),
+  email: z.string().trim().toLowerCase().max(200).pipe(z.email()),
+});
+export type JoinContacts = z.input<typeof joinContactsSchema>;
 export function createCustomerService(db: Database, options = { development: false }) {
   return {
     async requestVerification(
@@ -130,8 +138,10 @@ export function createCustomerService(db: Database, options = { development: fal
       programmeId: string,
       name: string,
       consents: { sms: boolean; whatsapp: boolean },
+      contacts?: JoinContacts,
     ): Promise<{ id: string }> {
       if (name.length > 100) throw new Error('Use a shorter display name.');
+      const declaredContacts = contacts ? joinContactsSchema.parse(contacts) : undefined;
       return db.transaction(async (tx) => {
         const programme = await tx.query<{ shop_id: string; shop_status: string }>(
           "SELECT p.shop_id,s.status AS shop_status FROM programmes p JOIN shops s ON s.id=p.shop_id WHERE p.id=$1 AND p.status='published' FOR UPDATE OF s",
@@ -163,8 +173,16 @@ export function createCustomerService(db: Database, options = { development: fal
         const membershipId = id();
         const memberCode = `NQ-${randomBytes(8).toString('hex').toUpperCase()}`;
         await tx.query(
-          'INSERT INTO memberships(id,shop_id,programme_id,customer_id,member_code) VALUES($1,$2,$3,$4,$5)',
-          [membershipId, shopId, programmeId, customerId, memberCode],
+          'INSERT INTO memberships(id,shop_id,programme_id,customer_id,member_code,contact_phone,contact_email) VALUES($1,$2,$3,$4,$5,$6,$7)',
+          [
+            membershipId,
+            shopId,
+            programmeId,
+            customerId,
+            memberCode,
+            declaredContacts?.phone || null,
+            declaredContacts?.email || null,
+          ],
         );
         for (const channel of ['sms', 'whatsapp'] as const)
           await tx.query(

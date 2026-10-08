@@ -9,6 +9,11 @@ async function secretStorage(page: Page) {
   return page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
 }
 
+async function fillShopContacts(page: Page) {
+  await page.getByLabel('Phone number', { exact: true }).fill('+212600002011');
+  await page.getByLabel('Email address', { exact: true }).fill('password.customer@example.com');
+}
+
 test('a password account keeps the same purchased card across browsers and rotates recovery credentials', async ({
   browser,
 }, testInfo) => {
@@ -31,16 +36,18 @@ test('a password account keeps the same purchased card across browsers and rotat
       customer.getByRole('heading', { name: 'Morrow Coffee', exact: true }),
     ).toBeVisible();
     await expect(customer.getByLabel('Password', { exact: true })).toBeVisible();
-    await expect(customer.getByLabel('Phone number')).toHaveCount(0);
+    await expect(customer.getByLabel('Phone number')).toBeVisible();
+    await expect(customer.getByLabel('Email address')).toBeVisible();
+    await fillShopContacts(customer);
     await customer.getByLabel('First name').fill('Password Customer');
     await customer.getByLabel('Password', { exact: true }).fill('OriginalCustomerPassword123!');
-    await customer.getByRole('button', { name: 'Create my account', exact: true }).click();
+    await customer.getByRole('button', { name: 'Save my card', exact: true }).click();
     const accountId = await customer.getByLabel('Account ID', { exact: true }).inputValue();
     const originalKey = await customer.getByLabel('Recovery key', { exact: true }).inputValue();
     expect(accountId).toBeTruthy();
     expect(originalKey.length).toBeGreaterThanOrEqual(32);
     await expect(
-      customer.getByRole('button', { name: 'Open my card', exact: true }),
+      customer.getByRole('button', { name: 'Save my card', exact: true }),
     ).toBeDisabled();
     expect((await secretStorage(customer)).includes(originalKey)).toBe(false);
     expect(customer.url().includes(originalKey)).toBe(false);
@@ -52,7 +59,7 @@ test('a password account keeps the same purchased card across browsers and rotat
     expect(saved.includes(accountId)).toBe(true);
     expect(saved.includes(originalKey)).toBe(true);
     await customer.getByLabel('I have saved my account ID and recovery key').check();
-    await customer.getByRole('button', { name: 'Open my card', exact: true }).click();
+    await customer.getByRole('button', { name: 'Save my card', exact: true }).click();
     await expect(customer.getByTestId('stamp-progress')).toBeVisible();
     const cardId = new URL(customer.url()).pathname.split('/').pop()!;
     const card = await (await first.request.get(`/api/card/${cardId}`)).json();
@@ -174,9 +181,17 @@ test('reloading the one-time key step offers password-confirmed replacement with
   request,
 }, testInfo) => {
   expect((await request.get('/api/public/shop/morrow', { timeout: 60000 })).ok()).toBe(true);
+  let joinBody: Record<string, unknown> | undefined;
+  let registrations = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/join') && request.method() === 'POST')
+      joinBody = request.postDataJSON();
+    if (request.url().endsWith('/api/auth/customer/register')) registrations++;
+  });
   await page.goto('/join/morrow');
+  await fillShopContacts(page);
   await page.getByLabel('Password', { exact: true }).fill('ReloadCustomerPassword123!');
-  await page.getByRole('button', { name: 'Create my account', exact: true }).click();
+  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
   const accountId = await page.getByLabel('Account ID', { exact: true }).inputValue();
   const originalKey = await page.getByLabel('Recovery key', { exact: true }).inputValue();
   expect((await secretStorage(page)).includes(originalKey)).toBe(false);
@@ -189,6 +204,10 @@ test('reloading the one-time key step offers password-confirmed replacement with
   await page.getByRole('button', { name: 'Make a replacement recovery key', exact: true }).click();
   const newKey = await page.getByLabel('Recovery key', { exact: true }).inputValue();
   expect(newKey !== originalKey).toBe(true);
+  await expect(page.getByLabel('Account ID', { exact: true })).toHaveValue(accountId);
+  await expect(page.getByLabel('Phone number', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Phone number', { exact: true })).toHaveValue('');
+  await expect(page.getByLabel('Email address', { exact: true })).toHaveValue('');
   expect((await secretStorage(page)).includes(newKey)).toBe(false);
   const oldRecovery = await request.post('/api/auth/customer/recover', {
     headers: { origin: String(testInfo.project.use.baseURL) },
@@ -196,8 +215,27 @@ test('reloading the one-time key step offers password-confirmed replacement with
   });
   expect(oldRecovery.ok()).toBe(false);
   await page.getByLabel('I have saved my account ID and recovery key').check();
-  await page.getByRole('button', { name: 'Open my card', exact: true }).click();
+  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'country code' })).toBeVisible();
+  expect(joinBody).toBeUndefined();
+  await page.getByLabel('Phone number', { exact: true }).fill('+212600002011');
+  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'valid email address' })).toBeVisible();
+  expect(joinBody).toBeUndefined();
+  await page.getByLabel('Email address', { exact: true }).fill('password.customer@example.com');
+  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
   await expect(page.getByTestId('stamp-progress')).toBeVisible();
+  expect(registrations).toBe(1);
+  expect(joinBody?.contacts).toEqual({
+    phone: '+212600002011',
+    email: 'password.customer@example.com',
+  });
+  const stored = await secretStorage(page);
+  expect(stored).not.toContain(newKey);
+  expect(stored).not.toContain('password.customer@example.com');
+  expect(
+    await page.evaluate(() => sessionStorage.getItem('nqta.customer-shop-enrollment')),
+  ).toBeNull();
 });
 
 test('an interrupted key save cannot rotate another account signed in from a second tab', async ({
@@ -213,21 +251,23 @@ test('an interrupted key save cannot rotate another account signed in from a sec
     );
     const firstTab = await customer.newPage();
     await firstTab.goto('/join/morrow');
+    await fillShopContacts(firstTab);
     await firstTab.getByLabel('Password', { exact: true }).fill(password);
-    await firstTab.getByRole('button', { name: 'Create my account', exact: true }).click();
+    await firstTab.getByRole('button', { name: 'Save my card', exact: true }).click();
     const accountA = await firstTab.getByLabel('Account ID', { exact: true }).inputValue();
     const keyA = await firstTab.getByLabel('Recovery key', { exact: true }).inputValue();
 
     // A separate tab has separate sessionStorage and shares the ordinary customer cookie.
     const secondTab = await customer.newPage();
     await secondTab.goto('/join/morrow');
+    await fillShopContacts(secondTab);
     await secondTab.getByLabel('Password', { exact: true }).fill(password);
-    await secondTab.getByRole('button', { name: 'Create my account', exact: true }).click();
+    await secondTab.getByRole('button', { name: 'Save my card', exact: true }).click();
     const accountB = await secondTab.getByLabel('Account ID', { exact: true }).inputValue();
     const keyB = await secondTab.getByLabel('Recovery key', { exact: true }).inputValue();
     expect(accountB !== accountA).toBe(true);
     await secondTab.getByLabel('I have saved my account ID and recovery key').check();
-    await secondTab.getByRole('button', { name: 'Open my card', exact: true }).click();
+    await secondTab.getByRole('button', { name: 'Save my card', exact: true }).click();
     await expect(secondTab.getByTestId('stamp-progress')).toBeVisible();
 
     await firstTab.reload();
@@ -278,7 +318,7 @@ test('an interrupted key save cannot rotate another account signed in from a sec
     await firstTab.getByRole('button', { name: 'Sign in and open my card', exact: true }).click();
     expect((await signedInRotation).postDataJSON().accountId).toBe(accountA);
     await expect(
-      firstTab.getByRole('button', { name: 'Open my card', exact: true }),
+      firstTab.getByRole('button', { name: 'Save my card', exact: true }),
     ).toBeDisabled();
     await expect(firstTab.getByLabel('Recovery key', { exact: true })).toBeVisible();
   } finally {

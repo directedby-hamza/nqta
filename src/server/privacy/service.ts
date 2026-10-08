@@ -57,7 +57,7 @@ export function createPrivacyService(db: Database) {
           `removed:${removedId}`,
         ]);
         await tx.query(
-          "UPDATE memberships SET customer_id=$1,status='closed',member_code=$2 WHERE id=$3",
+          "UPDATE memberships SET customer_id=$1,status='closed',member_code=$2,contact_phone=NULL,contact_email=NULL WHERE id=$3",
           [removedId, `CLOSED-${id()}`, request.membership_id],
         );
         await tx.query(

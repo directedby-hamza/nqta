@@ -1,5 +1,7 @@
 'use client';
 import { useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
+import { z } from 'zod';
 import { ArrowRight } from 'lucide-react';
 import { api, ApiError, message } from '@/lib/api';
 import { ErrorNotice } from '@/components/ui/primitives';
@@ -7,7 +9,77 @@ import { SaveRecoveryKey } from '@/features/auth/save-recovery-key';
 
 export type CustomerAccountMode = 'create' | 'sign-in' | 'recover';
 type SavedDetails = { accountId: string; recoveryKey: string };
+type ShopContacts = {
+  phone: string;
+  email: string;
+  onPhoneChange: (phone: string) => void;
+  onEmailChange: (email: string) => void;
+};
 const pendingKeyStorage = 'nqta.customer-key-save';
+const pendingEnrollmentStorage = 'nqta.customer-shop-enrollment';
+
+function ShopContactFields({ contacts }: { contacts: ShopContacts }) {
+  return (
+    <>
+      <div className="field">
+        <label htmlFor="customer-contact-phone">Phone number</label>
+        <input
+          id="customer-contact-phone"
+          type="tel"
+          autoComplete="tel"
+          placeholder="+212 6 00 00 00 00"
+          value={contacts.phone}
+          onChange={(event) => contacts.onPhoneChange(event.target.value)}
+          maxLength={25}
+          required
+        />
+        <small>Include + and your country code, for example +212.</small>
+      </div>
+      <div className="field">
+        <label htmlFor="customer-contact-email">Email address</label>
+        <input
+          id="customer-contact-email"
+          type="email"
+          autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          placeholder="you@example.com"
+          value={contacts.email}
+          onChange={(event) => contacts.onEmailChange(event.target.value)}
+          maxLength={200}
+          required
+        />
+        <small>
+          Your details are shared with this shop. They do not sign you in or recover your account.
+        </small>
+      </div>
+    </>
+  );
+}
+
+function FirstNameField({
+  name,
+  onNameChange,
+}: {
+  name: string;
+  onNameChange: (value: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label htmlFor="first-name">
+        First name <span className="muted">(optional)</span>
+      </label>
+      <input
+        id="first-name"
+        autoComplete="given-name"
+        placeholder="How should we say hello?"
+        value={name}
+        onChange={(event) => onNameChange(event.target.value)}
+        maxLength={100}
+      />
+    </div>
+  );
+}
 
 async function rotateAccountKey(accountId: string, password: string): Promise<SavedDetails> {
   try {
@@ -30,19 +102,29 @@ export function PasswordAccount({
   name,
   onNameChange,
   onAuthenticated,
+  contacts,
+  enrollmentShop,
+  saveToAppleWallet = false,
+  savedCardHref,
 }: {
   initialMode?: CustomerAccountMode;
   name: string;
   onNameChange: (name: string) => void;
-  onAuthenticated: () => Promise<void>;
+  onAuthenticated: (saveToAppleWallet?: boolean) => Promise<void>;
+  contacts?: ShopContacts;
+  enrollmentShop?: string;
+  saveToAppleWallet?: boolean;
+  savedCardHref?: string;
 }) {
   const [mode, setMode] = useState<CustomerAccountMode | 'replace-key'>(initialMode);
   const [accountId, setAccountId] = useState('');
   const [pendingAccountId, setPendingAccountId] = useState('');
+  const [pendingEnrollmentAccountId, setPendingEnrollmentAccountId] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [recoveryKey, setRecoveryKey] = useState('');
   const [details, setDetails] = useState<SavedDetails | null>(null);
+  const [createdForShop, setCreatedForShop] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -53,21 +135,34 @@ export function PasswordAccount({
         setAccountId(pending);
         setPendingAccountId(pending);
         setMode('replace-key');
+        const enrollment = JSON.parse(sessionStorage.getItem(pendingEnrollmentStorage) || 'null');
+        if (enrollment?.accountId === pending && enrollment?.shop === enrollmentShop)
+          setPendingEnrollmentAccountId(pending);
       }
     } catch {
-      // Only a public account identifier is kept for interrupted-flow guidance.
+      // Only public account/shop identifiers are kept. Contact details must be entered again.
     }
-  }, []);
+  }, [enrollmentShop]);
 
-  function showKey(value: SavedDetails) {
+  function showKey(value: SavedDetails, newlyCreated = false) {
     setPassword('');
     setConfirmPassword('');
     setRecoveryKey('');
     setAccountId(value.accountId);
     setPendingAccountId(value.accountId);
     setDetails(value);
+    const enrollment =
+      !!contacts && (newlyCreated || pendingEnrollmentAccountId === value.accountId);
+    setCreatedForShop(enrollment);
+    setPendingEnrollmentAccountId(enrollment ? value.accountId : '');
     try {
       sessionStorage.setItem(pendingKeyStorage, value.accountId);
+      if (enrollment && enrollmentShop)
+        sessionStorage.setItem(
+          pendingEnrollmentStorage,
+          JSON.stringify({ accountId: value.accountId, shop: enrollmentShop }),
+        );
+      else sessionStorage.removeItem(pendingEnrollmentStorage);
     } catch {
       // The raw key stays in this component's memory, regardless of storage availability.
     }
@@ -75,18 +170,21 @@ export function PasswordAccount({
 
   function clearPending() {
     setPendingAccountId('');
+    setPendingEnrollmentAccountId('');
     try {
       sessionStorage.removeItem(pendingKeyStorage);
+      sessionStorage.removeItem(pendingEnrollmentStorage);
     } catch {
       // Acknowledgement remains usable when browser storage is unavailable.
     }
   }
 
   async function continueToCard() {
-    setBusy(true);
     setError('');
+    if (createdForShop && !validateContacts()) return;
+    setBusy(true);
     try {
-      await onAuthenticated();
+      await onAuthenticated(createdForShop ? saveToAppleWallet : undefined);
       clearPending();
       setDetails(null);
     } catch (e) {
@@ -96,9 +194,23 @@ export function PasswordAccount({
     }
   }
 
+  function validateContacts() {
+    if (!contacts) return true;
+    if (!/^\+[1-9]\d{7,14}$/.test(contacts.phone.replace(/[\s()-]/g, ''))) {
+      setError('Use a phone number with its country code, for example +212600000001.');
+      return false;
+    }
+    if (!z.email().max(200).safeParse(contacts.email.trim().toLowerCase()).success) {
+      setError('Enter a valid email address before saving your card.');
+      return false;
+    }
+    return true;
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError('');
+    if (mode === 'create' && !validateContacts()) return;
     if (mode === 'recover' && password !== confirmPassword) {
       setError('Your passwords do not match.');
       return;
@@ -111,6 +223,7 @@ export function PasswordAccount({
             method: 'POST',
             body: { password },
           }),
+          true,
         );
       } else if (mode === 'recover') {
         showKey(
@@ -150,17 +263,40 @@ export function PasswordAccount({
   }
 
   if (details) {
+    const continueLabel = createdForShop
+      ? saveToAppleWallet
+        ? 'Save to Apple Wallet'
+        : 'Save my card'
+      : 'Open my card';
     return (
       <div className="stack">
         <h3>Keep your little progress safe.</h3>
+        {createdForShop && contacts && (
+          <>
+            <ShopContactFields contacts={contacts} />
+            <FirstNameField name={name} onNameChange={onNameChange} />
+          </>
+        )}
         <SaveRecoveryKey
           accountId={details.accountId}
           recoveryKey={details.recoveryKey}
           busy={busy}
-          continueLabel={busy ? 'Opening your card…' : 'Open my card'}
+          continueLabel={busy ? 'Preparing your card…' : continueLabel}
           onContinue={() => void continueToCard()}
         />
+        {createdForShop && (
+          <p className="subtle">
+            {saveToAppleWallet
+              ? 'On iPhone, confirm Add in Apple Wallet.'
+              : 'Apple Wallet is not available for this shop yet.'}
+          </p>
+        )}
         <ErrorNotice error={error} />
+        {error && savedCardHref && (
+          <Link href={savedCardHref} className="button quiet wide" onClick={clearPending}>
+            Open my saved card
+          </Link>
+        )}
       </div>
     );
   }
@@ -183,27 +319,16 @@ export function PasswordAccount({
         ) : (
           <div className="join-recovery" style={{ marginBottom: 20 }}>
             {mode === 'create'
-              ? 'Choose a password. We’ll give you an account ID and a recovery key to save.'
+              ? contacts
+                ? 'Enter your contact details and choose a private access code. Save your recovery details once, then use your card’s QR on your next visit.'
+                : 'Choose a password. We’ll give you an account ID and a recovery key to save.'
               : mode === 'sign-in'
                 ? 'Use your saved account ID and password to open the same card and rewards.'
                 : 'Use your saved account ID and recovery key to choose a new password. This replaces your recovery key and signs out your other devices.'}
           </div>
         )}
-        {mode === 'create' && (
-          <div className="field">
-            <label htmlFor="first-name">
-              First name <span className="muted">(optional)</span>
-            </label>
-            <input
-              id="first-name"
-              autoComplete="given-name"
-              placeholder="How should we say hello?"
-              value={name}
-              onChange={(event) => onNameChange(event.target.value)}
-              maxLength={100}
-            />
-          </div>
-        )}
+        {mode === 'create' && contacts && <ShopContactFields contacts={contacts} />}
+        {mode === 'create' && <FirstNameField name={name} onNameChange={onNameChange} />}
         {mode !== 'create' && (
           <div className="field">
             <label htmlFor="customer-account-id">Account ID</label>
@@ -254,7 +379,11 @@ export function PasswordAccount({
             maxLength={200}
             required
           />
-          <small>Use 10–200 characters.</small>
+          <small>
+            {mode === 'create' && contacts
+              ? 'Your private access code is a password of 10–200 characters. Keep it private; it is not a text-message code.'
+              : 'Use 10–200 characters.'}
+          </small>
         </div>
         {mode === 'recover' && (
           <div className="field">
@@ -276,7 +405,9 @@ export function PasswordAccount({
           {busy
             ? 'One little moment…'
             : mode === 'create'
-              ? 'Create my account'
+              ? contacts
+                ? 'Save my card'
+                : 'Create my account'
               : mode === 'sign-in'
                 ? 'Sign in and open my card'
                 : mode === 'recover'

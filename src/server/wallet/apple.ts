@@ -281,9 +281,10 @@ export function buildAppleWalletPass(
     );
     pkpass.type = 'storeCard';
     pkpass.primaryFields.push({
-      key: 'progress',
-      label: closed ? 'MEMBERSHIP' : 'STAMPS',
-      value: closed ? 'Inactive' : card.progress + ' / ' + card.threshold,
+      key: 'points',
+      label: closed ? 'MEMBERSHIP' : 'POINTS EARNED',
+      value: closed ? 'Inactive' : card.totalStamps,
+      ...(!closed ? { changeMessage: 'You now have %@ points.' } : {}),
     });
     if (!closed) {
       pkpass.headerFields.push({
@@ -291,11 +292,14 @@ export function buildAppleWalletPass(
         label: 'REWARDS',
         value: card.rewards.filter((reward) => reward.state === 'available').length,
       });
-      pkpass.secondaryFields.push({
-        key: 'reward',
-        label: 'REWARD',
-        value: clean(card.rewardDescription, 150),
-      });
+      pkpass.secondaryFields.push(
+        { key: 'welcome', label: 'WELCOME', value: 'Hey, welcome back!' },
+        {
+          key: 'progress',
+          label: 'NEXT REWARD',
+          value: card.progress + ' / ' + card.threshold,
+        },
+      );
       pkpass.auxiliaryFields.push({
         key: 'earning',
         label: 'EARNING',
@@ -307,6 +311,7 @@ export function buildAppleWalletPass(
         messageEncoding: 'iso-8859-1',
       });
       pkpass.backFields.push(
+        { key: 'reward', label: 'Your reward', value: clean(card.rewardDescription, 150) },
         { key: 'eligibility', label: 'Eligibility', value: clean(card.eligibility) },
         { key: 'terms', label: 'Terms', value: clean(card.terms) },
         {
