@@ -2,12 +2,18 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Logo } from '@/components/layout/merchant-shell';
+import { useResource } from '@/lib/use-resource';
+import { ErrorNotice } from '@/components/ui/primitives';
 export default function Page() {
+  const config = useResource<{ authMode: 'verified-contact' | 'recovery-key' }>('public/config');
+  const keyMode = config.data?.authMode === 'recovery-key';
   const [slug, setSlug] = useState('');
   const router = useRouter();
   function submit(e: FormEvent) {
     e.preventDefault();
-    router.push(`/join/${encodeURIComponent(slug.trim().toLowerCase())}`);
+    router.push(
+      `/join/${encodeURIComponent(slug.trim().toLowerCase())}${keyMode ? '?auth=sign-in' : ''}`,
+    );
   }
   return (
     <main className="customer-page">
@@ -19,8 +25,12 @@ export default function Page() {
           <div className="eyebrow">Pick up where you left off</div>
           <h1>Find your card.</h1>
           <p className="subtle" style={{ margin: '16px 0' }}>
-            Enter your shop’s URL name, or scan its enrolment QR again. Verify the same phone to
-            restore your saved card and rewards.
+            Enter your shop’s URL name, or scan its enrolment QR again.{' '}
+            {keyMode
+              ? 'Use your account ID and password to restore your saved card and rewards. If you forgot your password, use your saved recovery key.'
+              : config.data
+                ? 'Verify the same phone to restore your saved card and rewards.'
+                : 'Sign in through your shop to restore your saved card and rewards.'}
           </p>
           <form onSubmit={submit}>
             <div className="field">
@@ -34,7 +44,10 @@ export default function Page() {
                 pattern="[a-z0-9]+(-[a-z0-9]+)*"
               />
             </div>
-            <button className="button primary wide">Find my shop</button>
+            <ErrorNotice error={config.error} />
+            <button className="button primary wide" disabled={config.loading || !!config.error}>
+              Find my shop
+            </button>
           </form>
         </div>
       </div>

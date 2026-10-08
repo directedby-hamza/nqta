@@ -13,6 +13,7 @@ import { assertActor } from '../auth/permissions';
 import { hashCode, hashToken, id } from '../auth/crypto';
 import { readMembership } from './membership';
 import { OperationRejectedError } from './errors';
+import { enqueueMembershipWalletUpdates } from '../wallet/store';
 
 async function audit(db: Database, actor: Actor, action: string, target: string, reason?: string) {
   await db.query(
@@ -126,6 +127,7 @@ export function createLoyaltyService(db: Database) {
           );
         }
         await audit(tx, actor, 'purchase.recorded', eventId);
+        await enqueueMembershipWalletUpdates(tx, card.id);
         const current = await readMembership(tx, card.id, { shopId: actor.shopId });
         const newlyIssuedRewardId = current.rewards.find(
           (reward) =>
@@ -206,6 +208,7 @@ export function createLoyaltyService(db: Database) {
           );
           await tx.query('UPDATE redemption_challenges SET used=true WHERE id=$1', [challenge.id]);
           await audit(tx, actor, 'reward.redeemed', reward.id);
+          await enqueueMembershipWalletUpdates(tx, reward.membership_id);
           return { eventId, rewardId: reward.id, state: 'redeemed' };
         },
       );
@@ -275,6 +278,7 @@ export function createLoyaltyService(db: Database) {
               ],
             );
           await audit(tx, actor, 'purchase.reversed', purchase.id, input.reason.trim());
+          await enqueueMembershipWalletUpdates(tx, purchase.membership_id);
           return { eventId, needsReview };
         },
         true,

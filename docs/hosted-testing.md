@@ -88,7 +88,7 @@ Open the hosted service in the phone's browser and on the computer. HTTPS is req
 - **Refund correction:** as owner, reverse a test purchase in **Activity** with an invented refund reason. Check the stamp is reversed. If the associated reward was already enjoyed, check the reconciliation flag; the app records the correction and does not refund a real payment.
 - **Preferences and requests:** on the phone card, change SMS/WhatsApp preferences, refresh, and confirm they persist. Submit a deletion request and inspect the owner request queue. Deletion and assisted recovery remain review requests in this MVP.
 - **Interrupted confirmation:** if a purchase or redemption response is interrupted, reload the cashier and use **Resume pending confirmation** to resolve that same saved action before creating another receipt. Confirm it appears only once in activity.
-- **Persistence:** reload both devices, sign out/in, and repeat after a fresh Netlify function instance or a new deployment; for the alternative Render host, also test a service restart. Records should remain in Neon. Browser sessions may require sign-in again if you rotate `SESSION_SECRET`.
+- **Persistence:** reload both devices, sign out/in, and repeat after a fresh Netlify function instance or a new deployment; for the alternative Render host, also test a service restart. Records should remain in Neon. `SESSION_SECRET` rotation invalidates outstanding verification codes. Revoke stored sessions explicitly when access must be removed.
 
 ## Free host behaviour and real launch
 

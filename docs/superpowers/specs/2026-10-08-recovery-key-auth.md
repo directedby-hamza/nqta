@@ -1,0 +1,17 @@
+# Account passwords and recovery keys
+
+The founder approved customer accounts using a password and a saved recovery key instead of proving phone ownership. The launch target is no message-delivery dependency. This supersedes the verified-phone requirement only when the explicit `AUTH_MODE=recovery-key` configuration is selected. Existing verified-contact mode and the protected hosted test site remain supported.
+
+Customer registration allocates an account identifier, creates a password hash, returns a high-entropy recovery key once, and starts an ordinary customer session. The account identifier and password recover the same memberships from another device. The public membership QR is never an authentication credential. Customer phone becomes optional; key accounts have no verified phone and cannot opt into phone contact channels.
+
+Recovering with the account identifier and recovery key atomically changes the password, revokes prior customer sessions, rotates the recovery key, and returns a new session. Old keys cannot be replayed; concurrent uses permit only one success. Passwords retain the existing 10–200 character policy. Persist only password/key hashes. Registration, sign-in and recovery use durable rate limits; invalid credentials receive a generic response.
+
+In message-free mode new shop owners and invited staff use existing email/password identifiers plus a saved recovery key. Email is an account identifier, not a claim of verified mailbox control. New staff receive an explicit per-account authentication method; never mark their email verified or bypass verification for existing contact-mode accounts. Invitations remain owner-issued, expiring, single-use links shared directly by the owner. Staff key recovery rotates the key and revokes sessions. Email reset/verification routes and customer SMS routes are unavailable in recovery-key mode, so credentials cannot be replaced through an inactive delivery path.
+
+`AUTH_MODE` accepts exactly `verified-contact` or `recovery-key`; default is verified-contact. Only recovery-key mode may run without delivery provider configuration. All production requirements for HTTPS origin, TLS PostgreSQL, strong secrets, no sample accounts and separate clean data remain. Switching modes never silently converts existing accounts.
+
+UI shows create/sign-in/recover steps, a save/download panel for the account identifier and recovery key, and explains that losing both password and key requires assistance. Keys are never stored in localStorage, URLs, logs or analytics; the one-time panel requires acknowledgement before continuing. Existing SMS UI remains in contact mode. Merchant/staff use equivalent save-key guidance.
+
+Interrupted customer key saving can issue a replacement after password confirmation. The browser must send the displayed account ID; the API requires it and the service checks it under the credential lock before changing the key. An account switched in another tab must not be rotated by the original account's pending form. Interrupted staff key acknowledgement provides a way to reopen recovery using the saved replacement key.
+
+Append migration 3; do not modify migrations 1 or 2 or erase any existing test/production records. Test database migrations, incorrect credentials, recovery replay/concurrency, session revocation, role restrictions and a two-browser customer/card/cashier journey. This work proves local behaviour; public deployment and physical-phone checks require separate evidence. Free infrastructure quotas are not a perpetual zero-cost guarantee.

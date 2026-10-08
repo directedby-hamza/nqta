@@ -142,7 +142,7 @@ export function createReportingService(db: Database) {
       const { rows } = await db.query<{
         id: string;
         name: string;
-        phone: string;
+        phone: string | null;
         member_code: string;
         created_at: Date;
         stamps: string;

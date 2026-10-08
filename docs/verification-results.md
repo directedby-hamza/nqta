@@ -44,3 +44,17 @@ Fourth deploy **`6ac454ffe559490685609057`** is confirmed **Published / Building
 Additional read-only live checks opened owner overview, customers (**13**), programme, and settings/team (**2 staff**) with HTTP 200. Fresh **390px** mobile join/sign-in pages showed no overflow or browser errors. Netlify's optional badge was disabled; a fresh **390×844** join-page check with empty local storage found no visible badge, an uncovered phone input, a document width of 390px, and no browser or HTTP errors.
 
 Physical phones/cameras, real SMS, the live interrupted-confirmation UI, and backup/restore remain untested. English/LTR with no Arabic language switch remains the documented MVP interface. The prior local **71/71 database/unit** and **14/14 Chromium** results remain the evidence for their covered regressions. See [deployment status](deployment-status.md) for the verified deployment scope and [hosted testing](hosted-testing.md) for phone/computer steps.
+
+## Production upgrade evidence — 6 October 2026
+
+This later verification covers the production-upgrade source in the local workspace. The preceding sections retain the evidence for earlier application and hosted test versions; their publication and deployment claims do not extend to this upgrade.
+
+- Final complete unit/integration suite: **207/207 passed**, **21 files**, **334.63s**. Covers configuration, provider error handling with mocked delivery, merchant verification/password recovery, privacy fulfilment, migrations, loyalty and encrypted restoration.
+- Full Chromium browser run: **16/16 passed in 2.3m**. An additional owner deletion UI regression passed **1/1 in a separate run, 48.8s**. These are two completed runs, not one 17-test full-suite run; local simulated delivery does not establish actual SMS/email acceptance or physical-device compatibility.
+- Strict TypeScript and the final Next.js Webpack production build passed. Final independent review found **no actionable P1/P2 issues**; see [review disposition](final-review.md#production-upgrade-review--6-october-2026).
+- The actual independent **TLS PostgreSQL** concurrency/restore drill passed with **exit 0 and 63 checks**. It restored **22 tables and 125 synthetic rows** and dropped both UUID-named schemas it created. A read-only follow-up found **zero** production public shops, staff, customers and events, **zero** disposable drill schemas, and **no active drill connections**.
+- A separate fresh **`nqta_production`** database and restricted application role were prepared with both migrations. Its encrypted baseline backup contains **22 tables and only two migration-history rows**; archive permissions are **0600** and parent-directory permissions **0700**. Scheduled backup execution and off-host storage are not yet configured.
+
+The existing Netlify synthetic test site and its test database remain unchanged. Publishing the upgraded source is currently blocked: GitHub integration writes returned **HTTP 403**, and remote `main` remains at **`19a5730`**. No upgraded deployment or real-customer cutover occurred.
+
+Approved Twilio/Resend accounts, the SMS spending allowance, Morocco sender/domain setup, actual mailbox/SMS acceptance, assigned production origin, supported physical-phone/camera checks and scheduled/off-host backups remain outstanding. Completed technical verification does not establish real-customer readiness. The [release runbook](production-release.md) and [launch gate](production-readiness.md) record these remaining dependencies.

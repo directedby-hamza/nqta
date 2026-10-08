@@ -24,6 +24,8 @@ type Support = {
   message: string;
   status: string;
   created_at: string;
+  resolved_at: string | null;
+  resolution: string;
 };
 export function SettingsPage() {
   const { workspace, refresh } = useWorkspace();
@@ -33,6 +35,10 @@ export function SettingsPage() {
   const [description, setDescription] = useState(shop.description);
   const [location, setLocation] = useState(shop.location);
   const [theme, setTheme] = useState(shop.theme);
+  const [privacyNotice, setPrivacyNotice] = useState(shop.privacy_notice || '');
+  const [privacyContact, setPrivacyContact] = useState(shop.privacy_contact || '');
+  const [resolve, setResolve] = useState<Support | null>(null);
+  const [resolution, setResolution] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
@@ -56,7 +62,7 @@ export function SettingsPage() {
     try {
       await api('shop', {
         method: 'PATCH',
-        body: { name, category, description, location, theme },
+        body: { name, category, description, location, theme, privacyNotice, privacyContact },
       });
       await refresh();
       setToast('Your shop profile is saved');
@@ -126,6 +132,25 @@ export function SettingsPage() {
       setRequest(false);
       await support.refresh();
       setToast('Review request saved in this workspace');
+    } catch (e) {
+      setModalError(message(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resolveRequest(e: FormEvent) {
+    e.preventDefault();
+    if (!resolve) return;
+    setBusy(true);
+    setModalError('');
+    try {
+      await api('support/resolve', {
+        method: 'POST',
+        body: { id: resolve.id, resolution, deletion: resolve.kind === 'deletion' },
+      });
+      setResolve(null);
+      await support.refresh();
+      setToast('Request completed and recorded');
     } catch (e) {
       setModalError(message(e));
     } finally {
@@ -216,6 +241,32 @@ export function SettingsPage() {
                     <option value="#3d4870">Evening blue</option>
                   </select>
                 </div>
+              </div>
+              <div className="field">
+                <label htmlFor="privacy-contact">Customer privacy contact</label>
+                <input
+                  id="privacy-contact"
+                  type="email"
+                  value={privacyContact}
+                  onChange={(e) => setPrivacyContact(e.target.value)}
+                  maxLength={200}
+                  required={!workspace.development}
+                />
+                <small>Customers can contact this email about their loyalty data.</small>
+              </div>
+              <div className="field">
+                <label htmlFor="privacy-notice">Your customer privacy notice</label>
+                <textarea
+                  id="privacy-notice"
+                  value={privacyNotice}
+                  onChange={(e) => setPrivacyNotice(e.target.value)}
+                  maxLength={5000}
+                  required={!workspace.development}
+                />
+                <small>
+                  Explain who manages the programme, how customer data is used, how long you keep
+                  it, and how customers exercise their choices. This appears on your enrolment page.
+                </small>
               </div>
               <div className="field">
                 <label>Customer enrolment URL</label>
@@ -332,6 +383,19 @@ export function SettingsPage() {
                     </div>
                     <p>{item.message}</p>
                     <small>{dateLabel(item.created_at)}</small>
+                    {item.resolution && <p>Resolution: {item.resolution}</p>}
+                    {item.status === 'open' && (
+                      <button
+                        className="button secondary"
+                        onClick={() => {
+                          setResolve(item);
+                          setResolution('');
+                          setModalError('');
+                        }}
+                      >
+                        {item.kind === 'deletion' ? 'Review and remove member' : 'Complete request'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -339,9 +403,9 @@ export function SettingsPage() {
               <div className="empty">No open requests. A little peace of mind.</div>
             )}
             <div className="panel-body subtle">
-              Requests are saved locally for owner review. Identity changes need verified proof;
-              accounts are never merged by name. Fulfilment and retention decisions are handled
-              manually in this pilot.
+              Requests are saved in your workspace. Record the decision after reviewing the
+              customer’s request. Removing a member closes this shop’s card and disconnects its
+              personal identity; purchase and reward records remain for reconciliation.
             </div>
           </div>
         </div>
@@ -356,18 +420,18 @@ export function SettingsPage() {
             <div className="panel-body">
               <span className="badge">
                 <Leaf size={11} />
-                {shop.subscription_status}
+                {workspace.development ? shop.subscription_status : 'Shop workspace'}
               </span>
               <h2 style={{ margin: '18px 0 9px' }}>A thoughtful start.</h2>
               <p className="subtle">
-                Your local pilot has one shop, a stamp programme, your team, and customer cards.
-                Billing is managed manually; no charge is processed here.
+                Your workspace includes a loyalty programme, your team, and customer cards. Set your
+                reward rules, publish your programme, and share your enrolment QR.
               </p>
               <div className="divider" />
-              <strong className="subtle">Next chapters</strong>
+              <strong className="subtle">Your team’s workflow</strong>
               <p className="subtle">
-                Wallet passes, points, messaging campaigns, multi-location programmes, live
-                subscriptions, and POS integrations belong to later rollout stages.
+                Staff record a paid receipt, customers collect stamps, and rewards are redeemed with
+                a short-lived confirmation code.
               </p>
             </div>
           </div>
@@ -401,7 +465,10 @@ export function SettingsPage() {
       >
         {inviteURL ? (
           <div className="stack">
-            <div className="notice">Invitation created. No email was sent in this local pilot.</div>
+            <div className="notice">
+              Invitation created. Share this private link with the person you invited. They choose a
+              password and verify their email.
+            </div>
             <label className="field">
               <span className="subtle">Invitation link</span>
               <input readOnly value={inviteURL} aria-label="Invitation link" />
@@ -475,6 +542,42 @@ export function SettingsPage() {
         <button className="button danger wide" disabled={busy} onClick={() => void revokeStaff()}>
           Confirm revocation
         </button>
+      </Modal>
+      <Modal
+        open={!!resolve}
+        onOpenChange={(open) => {
+          if (!open) setResolve(null);
+        }}
+        title={
+          resolve?.kind === 'deletion' ? 'Remove this shop’s member' : 'Complete review request'
+        }
+        description={
+          resolve?.kind === 'deletion'
+            ? 'This closes the card, revokes unused rewards, and disconnects the personal identity for this shop. Financial activity remains. Other shops’ cards stay available. This action cannot be undone.'
+            : 'Record the decision and any reconciliation you completed.'
+        }
+      >
+        <form className="stack" onSubmit={resolveRequest}>
+          <div className="field">
+            <label htmlFor="request-resolution">Decision and action taken</label>
+            <textarea
+              id="request-resolution"
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value)}
+              minLength={10}
+              maxLength={2000}
+              required
+            />
+          </div>
+          <ErrorNotice error={modalError} />
+          <button className="button primary wide" disabled={busy}>
+            {busy
+              ? 'Saving…'
+              : resolve?.kind === 'deletion'
+                ? 'Confirm removal'
+                : 'Complete request'}
+          </button>
+        </form>
       </Modal>
       <Modal
         open={pause}

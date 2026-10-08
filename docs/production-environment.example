@@ -1,0 +1,40 @@
+# Copy to .env.production privately. Never commit real values.
+NODE_ENV=production
+HOSTED_TEST_MODE=false
+DEMO_MODE=false
+AUTH_MODE=recovery-key
+APP_URL=https://YOUR_ASSIGNED_LIVE_ORIGIN
+DATABASE_URL=postgresql://USER:PASSWORD@HOST/EMPTY_PRODUCTION_DATABASE?sslmode=require
+SESSION_SECRET=GENERATE_AT_LEAST_32_RANDOM_CHARACTERS
+# The following delivery settings are used only with AUTH_MODE=verified-contact.
+# Leave them unset for recovery-key mode. Never expose simulated verification in production.
+# SMS_PROVIDER=twilio
+# TWILIO_ACCOUNT_SID=AC_YOUR_REAL_ACCOUNT_SID
+# TWILIO_AUTH_TOKEN=YOUR_PRIVATE_AUTH_TOKEN
+# Use a Messaging Service with an approved sender for the destination country.
+# TWILIO_MESSAGING_SERVICE_SID=MG_YOUR_APPROVED_SERVICE_SID
+# Alternative: TWILIO_FROM_NUMBER=YOUR_APPROVED_E164_OR_ALPHANUMERIC_SENDER
+# SMS_ALLOWED_PREFIXES=212
+# Set this to the number of SMS attempts your approved daily budget permits.
+# SMS_DAILY_LIMIT=100
+# EMAIL_PROVIDER=resend
+# RESEND_API_KEY=re_YOUR_PRIVATE_SENDING_KEY
+# EMAIL_FROM=Nqta <accounts@YOUR_VERIFIED_DOMAIN>
+# Store separately from backup files; exactly 32 random bytes, base64 encoded.
+BACKUP_ENCRYPTION_KEY=GENERATE_32_RANDOM_BYTES_AS_BASE64
+# Netlify build settings:
+NODE_VERSION=24.21.0
+NPM_FLAGS=--include=dev
+
+# Optional native Wallet integrations; enable each only with real credentials.
+# The Wallet auth secret must differ from SESSION_SECRET.
+# GOOGLE_WALLET_ISSUER_ID=
+# GOOGLE_WALLET_SERVICE_ACCOUNT_BASE64=
+# GOOGLE_WALLET_PUBLISHING_ACCESS=approved
+# APPLE_WALLET_PASS_TYPE_ID=
+# APPLE_WALLET_TEAM_ID=
+# APPLE_WALLET_SIGNER_CERT_BASE64=
+# APPLE_WALLET_SIGNER_KEY_BASE64=
+# APPLE_WALLET_SIGNER_KEY_PASSPHRASE=
+# APPLE_WALLET_WWDR_CERT_BASE64=
+# APPLE_WALLET_AUTH_SECRET=

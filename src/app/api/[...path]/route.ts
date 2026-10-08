@@ -1,8 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDatabase } from '@/server/db/client';
 import { createAuthService } from '@/server/auth/staff';
 import { createCustomerService } from '@/server/auth/customer';
+import {
+  createCustomerPasswordService,
+  CustomerCredentialError,
+} from '@/server/auth/customer-password';
+import { createStaffKeyRecoveryService } from '@/server/auth/staff-key-recovery';
 import { createWorkspace } from '@/server/auth/onboarding';
 import { applicationOrigin, trustedOrigin } from '@/server/auth/origin';
 import { assertActor } from '@/server/auth/permissions';
@@ -12,11 +17,23 @@ import { createProgrammeService } from '@/server/loyalty/programme';
 import { createReportingService } from '@/server/reporting/metrics';
 import { auditEvent } from '@/server/audit';
 import { id } from '@/server/auth/crypto';
-import { demoMode, hostedTestMode } from '@/server/environment';
+import { authMode, demoMode, hostedTestMode, recoveryKeyMode } from '@/server/environment';
 import { testAccessResponse } from '@/server/test-access';
+import { createStaffRecoveryService } from '@/server/auth/recovery';
+import { reserveLimit, RateLimitError } from '@/server/auth/rate-limit';
+import { DeliveryError } from '@/server/providers/email';
+import { VerificationDeliveryError } from '@/server/providers/verification';
+import { createPrivacyService } from '@/server/privacy/service';
+import { walletOptions } from '@/server/wallet/options';
+import { createWalletStore, enqueueShopWalletUpdates } from '@/server/wallet/store';
+import { flushWalletUpdates } from '@/server/wallet/delivery';
+import { googleWalletObjectId, googleWalletSaveUrl } from '@/server/wallet/google';
+import { applePassTypeIdentifier, createAppleWalletPass } from '@/server/wallet/apple';
+import { WalletUnavailableError } from '@/server/wallet/contracts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 const text = z.string().trim().min(1).max(200);
 const key = z.string().min(8).max(128);
 const consent = z.object({ sms: z.boolean(), whatsapp: z.boolean() });
@@ -57,13 +74,75 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
         throw new HttpError('Send a valid request.', 400);
       }
     }
-    const db = await getDatabase();
+    if (route === 'public/config' && method === 'GET')
+      return NextResponse.json(
+        {
+          isDemo: demoMode(),
+          hostedTest: hostedTestMode(),
+          authMode: authMode(),
+          wallet: walletOptions(),
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    const keyMode = recoveryKeyMode();
+    const contactRoutes = [
+      'auth/customer/request',
+      'auth/customer/verify',
+      'auth/staff/request-verification',
+      'auth/staff/request-reset',
+      'auth/staff/verify-email',
+      'auth/staff/reset-password',
+    ];
+    const keyRoutes = [
+      'auth/customer/register',
+      'auth/customer/sign-in',
+      'auth/customer/recover',
+      'auth/customer/rotate-recovery-key',
+      'auth/staff/recover-key',
+    ];
+    if ((keyMode && contactRoutes.includes(route)) || (!keyMode && keyRoutes.includes(route)))
+      throw new HttpError('This sign-in method is unavailable.', 404);
+    const db = await getDatabase().catch(() => {
+      throw new HttpError('The service is not ready. Please try again later.', 503);
+    });
     const auth = createAuthService(db);
     const isDemo = demoMode();
     const hostedTest = hostedTestMode();
     const customers = createCustomerService(db, { development: isDemo });
-    const json = (data: unknown) =>
-      NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
+    const passwordCustomers = createCustomerPasswordService(db);
+    const recovery = createStaffRecoveryService(db);
+    let scheduled = false;
+    function scheduleWalletUpdates() {
+      if (
+        scheduled ||
+        ![
+          'card/',
+          'membership',
+          'purchases',
+          'rewards/redeem',
+          'reversals',
+          'shop',
+          'support/resolve',
+          'wallet/',
+        ].some((prefix) => route.startsWith(prefix))
+      )
+        return;
+      const available = walletOptions();
+      if (!available.google && !available.apple) return;
+      scheduled = true;
+      try {
+        after(async () => {
+          await flushWalletUpdates(db, { limit: 2 }).catch(() => {});
+        });
+      } catch {
+        // A host without after support leaves the durable queue for the next
+        // request/CLI. A committed purchase must still return its saved outcome.
+      }
+    }
+    const json = (data: unknown) => {
+      scheduleWalletUpdates();
+      return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
+    };
     async function actor(owner = false) {
       let current;
       try {
@@ -81,7 +160,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
           request.cookies.get('nqta_customer')?.value || '',
         );
       } catch {
-        throw new HttpError('Verify your phone to recover your card.', 401);
+        throw new HttpError('Sign in to recover your card.', 401);
       }
     }
     function range() {
@@ -93,10 +172,87 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
         to: new Date().toISOString(),
       };
     }
+    if ((route === 'wallet/google' || route === 'wallet/apple') && method === 'POST') {
+      const provider = route === 'wallet/google' ? 'google' : 'apple';
+      const customerId = await customer();
+      if (!walletOptions()[provider]) throw new WalletUnavailableError();
+      const { membershipId } = z.object({ membershipId: text }).parse(body);
+      await reserveLimit(db, {
+        scope: 'wallet-issuance-global',
+        key: 'all',
+        limit: 1000,
+        windowSeconds: 900,
+      });
+      await reserveLimit(db, {
+        scope: 'wallet-issuance-customer',
+        key: customerId,
+        limit: 30,
+        windowSeconds: 3600,
+      });
+      const store = createWalletStore(db);
+      const issued = await store.getOrCreatePass(
+        customerId,
+        membershipId,
+        provider,
+        provider === 'google' ? googleWalletObjectId(membershipId) : applePassTypeIdentifier(),
+      );
+      if (provider === 'apple')
+        return json({ url: `/api/wallet/download/apple/${encodeURIComponent(membershipId)}` });
+      try {
+        await flushWalletUpdates(db, { passId: issued.pass.id });
+        const synced = await store.getPassBySerial('google', issued.pass.id);
+        if (!synced || synced.card.status !== 'active') throw new WalletUnavailableError();
+        return json({ url: googleWalletSaveUrl(synced.pass) });
+      } catch {
+        throw new WalletUnavailableError();
+      }
+    }
+    if (route.startsWith('wallet/download/apple/') && method === 'GET') {
+      const customerId = await customer();
+      if (!walletOptions().apple) throw new WalletUnavailableError();
+      const membershipId = text.parse(route.slice('wallet/download/apple/'.length));
+      await reserveLimit(db, {
+        scope: 'wallet-apple-download',
+        key: customerId,
+        limit: 60,
+        windowSeconds: 3600,
+      });
+      // Issuance is a browser-origin-checked POST. This GET only reads a pass
+      // already issued to this customer; a cross-site navigation cannot create it.
+      const card = await customers.getCard(customerId, membershipId);
+      if (card.status !== 'active') throw new HttpError('This membership is inactive.', 409);
+      const row = (
+        await db.query<{ id: string }>(
+          "SELECT p.id FROM wallet_passes p JOIN memberships m ON m.id=p.membership_id WHERE p.membership_id=$1 AND p.provider='apple' AND p.external_id=$2 AND m.customer_id=$3 AND m.status='active'",
+          [membershipId, applePassTypeIdentifier(), customerId],
+        )
+      ).rows[0];
+      if (!row)
+        throw new HttpError('Add this card to Apple Wallet from your Nqta card first.', 404);
+      const issued = await createWalletStore(db).getPassBySerial('apple', row.id);
+      if (!issued || issued.card.status !== 'active')
+        throw new HttpError('This membership is inactive.', 409);
+      const binary = await createAppleWalletPass(issued.pass, issued.card);
+      scheduleWalletUpdates();
+      return new NextResponse(new Uint8Array(binary), {
+        headers: {
+          'Content-Type': 'application/vnd.apple.pkpass',
+          'Content-Disposition': 'inline; filename="nqta-loyalty.pkpass"',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     if (route === 'auth/staff/sign-in' && method === 'POST') {
       const input = z
         .object({ email: z.email().max(200), password: z.string().min(1).max(200) })
         .parse(body);
+      await reserveLimit(db, {
+        scope: 'staff-sign-in-global',
+        key: 'all',
+        limit: 1000,
+        windowSeconds: 900,
+      });
       return session(
         json({ ok: true }),
         'nqta_staff',
@@ -126,10 +282,73 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
             .min(3)
             .max(50),
           category: text.max(100),
+          location: z.string().trim().max(200).optional(),
         })
         .parse(body);
+      await reserveLimit(db, {
+        scope: 'workspace-creation-global',
+        key: 'all',
+        limit: 30,
+        windowSeconds: 3600,
+      });
+      await reserveLimit(db, {
+        scope: 'workspace-creation-email',
+        key: input.email.toLowerCase(),
+        limit: 3,
+        windowSeconds: 900,
+      });
       const result = await createWorkspace(db, input);
+      return result.token
+        ? session(
+            json({ ok: true, ...(result.recoveryKey ? { recoveryKey: result.recoveryKey } : {}) }),
+            'nqta_staff',
+            result.token,
+            7,
+          )
+        : json({ ok: true, ...result });
+    }
+    if (route === 'auth/staff/recover-key' && method === 'POST') {
+      const input = z
+        .object({
+          email: z.email().max(200),
+          recoveryKey: z.string().min(1).max(200),
+          password: z.string().min(10).max(200),
+        })
+        .parse(body);
+      const result = await createStaffKeyRecoveryService(db).resetPassword(
+        input.email,
+        input.recoveryKey,
+        input.password,
+      );
+      return session(json({ ok: true, recoveryKey: result.recoveryKey }), 'nqta_staff', '', 0);
+    }
+    if (route === 'auth/staff/request-verification' && method === 'POST')
+      return json(
+        await recovery.requestVerification(
+          z.object({ email: z.email().max(200) }).parse(body).email,
+        ),
+      );
+    if (route === 'auth/staff/request-reset' && method === 'POST')
+      return json(
+        await recovery.requestPasswordReset(
+          z.object({ email: z.email().max(200) }).parse(body).email,
+        ),
+      );
+    if (route === 'auth/staff/verify-email' && method === 'POST') {
+      const result = await recovery.verifyEmail(
+        z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) }).parse(body).token,
+      );
       return session(json({ ok: true }), 'nqta_staff', result.token, 7);
+    }
+    if (route === 'auth/staff/reset-password' && method === 'POST') {
+      const input = z
+        .object({
+          token: z.string().regex(/^[a-f0-9]{64}$/),
+          password: z.string().min(10).max(200),
+        })
+        .parse(body);
+      await recovery.resetPassword(input.token, input.password);
+      return session(json({ ok: true }), 'nqta_staff', '', 0);
     }
     if (route === 'auth/sign-out' && method === 'POST') {
       const which = z.object({ kind: z.enum(['staff', 'customer']) }).parse(body).kind;
@@ -137,6 +356,71 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       const value = request.cookies.get(name)?.value;
       if (value) await auth.signOut(value);
       return session(json({ ok: true }), name, '', 0);
+    }
+    if (keyRoutes.includes(route) && route.startsWith('auth/customer/') && method === 'POST') {
+      await reserveLimit(db, {
+        scope: 'customer-key-auth-global',
+        key: 'all',
+        limit: 1000,
+        windowSeconds: 900,
+      });
+      if (route === 'auth/customer/register') {
+        const input = z.object({ password: z.string().min(10).max(200) }).parse(body);
+        const result = await passwordCustomers.register(input.password);
+        return session(
+          json({ ok: true, accountId: result.accountId, recoveryKey: result.recoveryKey }),
+          'nqta_customer',
+          result.token,
+          30,
+        );
+      }
+      if (route === 'auth/customer/rotate-recovery-key') {
+        const input = z
+          .object({
+            password: z.string().min(1).max(200),
+            accountId: z.string().trim().min(1).max(100),
+          })
+          .parse(body);
+        return json(
+          await passwordCustomers.rotateRecoveryKey(
+            await customer(),
+            input.password,
+            input.accountId,
+          ),
+        );
+      }
+      const input = z
+        .object({
+          accountId: z.string().trim().min(1).max(100),
+          password: z
+            .string()
+            .min(route === 'auth/customer/recover' ? 10 : 1)
+            .max(200),
+          recoveryKey: z.string().min(1).max(200).optional(),
+        })
+        .parse(body);
+      try {
+        if (route === 'auth/customer/recover') {
+          if (!input.recoveryKey) throw new HttpError('Enter your saved recovery key.', 400);
+          const result = await passwordCustomers.recover(
+            input.accountId,
+            input.recoveryKey,
+            input.password,
+          );
+          return session(
+            json({ ok: true, accountId: result.accountId, recoveryKey: result.recoveryKey }),
+            'nqta_customer',
+            result.token,
+            30,
+          );
+        }
+        const result = await passwordCustomers.signIn(input.accountId, input.password);
+        return session(json({ ok: true }), 'nqta_customer', result.token, 30);
+      } catch (error) {
+        if (error instanceof CustomerCredentialError)
+          throw new HttpError('The account credentials are incorrect.', 401);
+        throw error;
+      }
     }
     if (route === 'auth/customer/request' && method === 'POST')
       return json(await customers.requestVerification(z.object({ phone: text }).parse(body).phone));
@@ -162,7 +446,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       const slug = route.slice('public/shop/'.length);
       const shop = (
         await db.query(
-          'SELECT id,slug,name,category,description,location,theme,status FROM shops WHERE slug=$1',
+          'SELECT id,slug,name,category,description,location,theme,status,privacy_notice,privacy_contact FROM shops WHERE slug=$1',
           [slug],
         )
       ).rows[0];
@@ -336,12 +620,14 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
           description: z.string().max(500),
           location: text.max(200),
           theme: z.enum(['#175c46', '#263d38', '#a34e36', '#3d4870']),
+          privacyNotice: z.string().trim().max(5000).optional(),
+          privacyContact: z.union([z.email().max(200), z.literal('')]).optional(),
         })
         .parse(body);
       await db.transaction(async (tx) => {
         await assertActor(tx, current, true, true);
         await tx.query(
-          'UPDATE shops SET name=$1,category=$2,description=$3,location=$4,theme=$5 WHERE id=$6',
+          'UPDATE shops SET name=$1,category=$2,description=$3,location=$4,theme=$5,privacy_notice=COALESCE($7,privacy_notice),privacy_contact=COALESCE($8,privacy_contact) WHERE id=$6',
           [
             input.name,
             input.category,
@@ -349,9 +635,12 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
             input.location,
             input.theme,
             current.shopId,
+            input.privacyNotice ?? null,
+            input.privacyContact ?? null,
           ],
         );
         await auditEvent(tx, current.shopId, current.userId, 'shop.updated', current.shopId);
+        await enqueueShopWalletUpdates(tx, current.shopId);
       });
       return json({ ok: true });
     }
@@ -379,8 +668,8 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
     }
     if (route === 'staff/accept' && method === 'POST') {
       const input = z.object({ token: text, password: z.string().min(10).max(200) }).parse(body);
-      await auth.acceptStaffInvite(input.token, input.password);
-      return json({ ok: true });
+      const result = await auth.acceptStaffInvite(input.token, input.password);
+      return json({ ok: true, ...result });
     }
     if (route.startsWith('staff/') && method === 'DELETE') {
       await auth.revokeStaff(await actor(true), route.slice(6));
@@ -423,8 +712,47 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       });
       return json({ ok: true });
     }
+    if (route === 'support/resolve' && method === 'POST') {
+      const input = z
+        .object({
+          id: text,
+          resolution: z.string().trim().min(10).max(2000),
+          deletion: z.boolean(),
+        })
+        .parse(body);
+      const current = await actor(true);
+      const privacy = createPrivacyService(db);
+      if (input.deletion) await privacy.fulfilDeletion(current, input.id, input.resolution);
+      else await privacy.resolveRequest(current, input.id, input.resolution);
+      return json({ ok: true });
+    }
     throw new HttpError('This action could not be found.', 404);
   } catch (error) {
+    if (error instanceof CustomerCredentialError)
+      return NextResponse.json(
+        { error: 'The account credentials are incorrect.' },
+        {
+          status: 401,
+          headers: { 'Cache-Control': 'no-store' },
+        },
+      );
+    if (error instanceof RateLimitError)
+      return NextResponse.json(
+        { error: error.message },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(error.retryAfterSeconds), 'Cache-Control': 'no-store' },
+        },
+      );
+    if (
+      error instanceof DeliveryError ||
+      error instanceof VerificationDeliveryError ||
+      error instanceof WalletUnavailableError
+    )
+      return NextResponse.json(
+        { error: error.message },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } },
+      );
     if (error instanceof z.ZodError)
       return NextResponse.json(
         { error: error.issues[0]?.message || 'Check the form fields.', operationRejected: true },

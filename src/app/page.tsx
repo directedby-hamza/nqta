@@ -12,7 +12,10 @@ import {
 } from 'lucide-react';
 import { Logo } from '@/components/layout/merchant-shell';
 import { Reveal } from '@/components/ui/primitives';
+import { demoMode } from '@/server/environment';
+export const dynamic = 'force-dynamic';
 export default function Home() {
+  const demo = demoMode();
   return (
     <div className="landing">
       <header className="public-header">
@@ -43,11 +46,11 @@ export default function Home() {
               <br className="desktop-break" /> and give them a reason to come back.
             </p>
             <div className="hero-actions">
-              <Link href="/sign-in" className="button primary">
-                Explore the demo <ArrowUpRight size={16} />
+              <Link href={demo ? '/sign-in' : '/create-shop'} className="button primary">
+                {demo ? 'Explore the demo' : 'Create your shop'} <ArrowUpRight size={16} />
               </Link>
-              <Link href="/create-shop" className="button secondary">
-                Create your shop <ArrowRight size={16} />
+              <Link href={demo ? '/create-shop' : '/sign-in'} className="button secondary">
+                {demo ? 'Create your shop' : 'Merchant sign in'} <ArrowRight size={16} />
               </Link>
             </div>
             <div className="hero-foot">

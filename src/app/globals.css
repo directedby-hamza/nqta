@@ -1,5 +1,111 @@
 @import 'tailwindcss';
 
+.wallet-panel {
+  display: flex;
+  gap: 16px;
+  padding: 24px;
+  margin-bottom: 30px;
+}
+.wallet-icon {
+  color: #175c46;
+  padding: 12px;
+  background: #e9f1eb;
+  border-radius: 14px;
+  height: fit-content;
+}
+.wallet-copy {
+  flex: 1;
+  min-width: 0;
+}
+.wallet-copy h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+.wallet-copy p {
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 14px;
+  color: #63726a;
+}
+.wallet-copy small {
+  display: block;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #63726a;
+  margin-top: 8px;
+}
+.wallet-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.wallet-google-button {
+  width: 283px;
+  max-width: calc(100% - 16px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  margin: 8px;
+  flex-shrink: 0;
+}
+.wallet-google-button img {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+}
+.wallet-google-button:disabled {
+  opacity: 1;
+}
+.wallet-google-button:focus-visible {
+  outline: 2px solid #175c46;
+  outline-offset: 4px;
+}
+.wallet-button {
+  width: 283px;
+  max-width: calc(100% - 16px);
+  margin: 8px;
+  justify-content: center;
+  background: #182b23;
+  color: white;
+  transition:
+    transform 180ms ease,
+    background 180ms ease;
+}
+.wallet-button:hover:not(:disabled) {
+  background: #175c46;
+  transform: translateY(-2px);
+}
+.wallet-copy .wallet-error {
+  color: #a33d34;
+  margin-top: 12px;
+  margin-bottom: 0;
+}
+.wallet-copy .wallet-status {
+  margin-top: 12px;
+}
+@media (max-width: 480px) {
+  .wallet-panel {
+    padding: 18px;
+    gap: 12px;
+  }
+  .wallet-icon {
+    display: none;
+  }
+  .wallet-button {
+    font-size: 13px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wallet-button {
+    transition: none;
+  }
+  .wallet-button:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 @theme inline {
   --color-paper: #f7f8f5;
   --color-ink: #222c25;

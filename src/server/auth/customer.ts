@@ -3,9 +3,12 @@ import type { MembershipCard } from '../loyalty/types';
 import { randomBytes, randomInt } from 'node:crypto';
 import { hashCode, hashToken, id, token } from './crypto';
 import { readMembership } from '../loyalty/membership';
-import { deliverVerification } from '../providers/verification';
+import { deliverVerification, VerificationDeliveryError } from '../providers/verification';
 import { auditEvent } from '../audit';
-import { demoMode } from '../environment';
+import { demoMode, productionMode, recoveryKeyMode } from '../environment';
+import { reserveLimit, RateLimitError } from './rate-limit';
+import { assertMerchantPrivacy } from '../privacy/service';
+import { lockCustomerIdentity } from './identity-lock';
 export function normalisePhone(value: string) {
   const phone = value.replace(/[\s()-]/g, '');
   if (!/^\+[1-9]\d{7,14}$/.test(phone))
@@ -18,6 +21,15 @@ export function createCustomerService(db: Database, options = { development: fal
       value: string,
     ): Promise<{ challengeId: string; developmentCode?: string }> {
       const phone = normalisePhone(value);
+      if (productionMode()) {
+        const prefixes = (process.env.SMS_ALLOWED_PREFIXES || '').split(',').filter(Boolean);
+        if (!prefixes.length)
+          throw new VerificationDeliveryError(
+            'SMS verification is not configured. Please contact this shop.',
+          );
+        if (!prefixes.some((prefix) => phone.startsWith(`+${prefix}`)))
+          throw new Error('Phone verification is not available for this country.');
+      }
       const reserved = await db.query(
         `INSERT INTO verification_limits(phone) VALUES($1) ON CONFLICT(phone) DO UPDATE SET
         requests=CASE WHEN verification_limits.window_started<=NOW()-interval '10 minutes' THEN 1 ELSE verification_limits.requests+1 END,
@@ -25,13 +37,20 @@ export function createCustomerService(db: Database, options = { development: fal
         WHERE verification_limits.window_started<=NOW()-interval '10 minutes' OR verification_limits.requests<6 RETURNING phone`,
         [phone],
       );
-      if (!reserved.rows.length)
-        throw new Error('Too many verification requests. Please wait 10 minutes.');
+      if (!reserved.rows.length) throw new RateLimitError(600);
+      if (productionMode())
+        await reserveLimit(db, {
+          scope: 'sms-delivery-daily',
+          key: 'all',
+          limit: Number(process.env.SMS_DAILY_LIMIT),
+          windowSeconds: 86400,
+        });
       const challengeId = id();
       const code = randomInt(0, 1000000).toString().padStart(6, '0');
       const codeHash = hashCode(challengeId, code);
       await deliverVerification(phone, code, options.development);
       await db.transaction(async (tx) => {
+        await lockCustomerIdentity(tx, phone);
         await tx.query(
           'UPDATE verification_challenges SET used=true WHERE phone=$1 AND used=false',
           [phone],
@@ -51,6 +70,13 @@ export function createCustomerService(db: Database, options = { development: fal
       code: string,
     ): Promise<{ token: string; customerId: string }> {
       const result = await db.transaction(async (tx) => {
+        const identity = (
+          await tx.query<{ phone: string }>(
+            'SELECT phone FROM verification_challenges WHERE id=$1',
+            [challengeId],
+          )
+        ).rows[0];
+        if (identity) await lockCustomerIdentity(tx, identity.phone);
         const { rows } = await tx.query<{
           id: string;
           phone: string;
@@ -70,11 +96,11 @@ export function createCustomerService(db: Database, options = { development: fal
           ]);
           return { error: 'The verification code is incorrect.' };
         }
-        const identity = await tx.query<{ id: string }>(
+        const customer = await tx.query<{ id: string }>(
           'INSERT INTO customers(id,phone) VALUES($1,$2) ON CONFLICT(phone) DO UPDATE SET phone=EXCLUDED.phone RETURNING id',
           [id(), challenge.phone],
         );
-        const customerId = identity.rows[0].id;
+        const customerId = customer.rows[0].id;
         const sessionToken = token();
         await tx.query('UPDATE verification_challenges SET used=true WHERE id=$1', [challengeId]);
         await tx.query(
@@ -91,7 +117,12 @@ export function createCustomerService(db: Database, options = { development: fal
         "SELECT principal_id FROM sessions WHERE token_hash=$1 AND kind='customer' AND expires_at>NOW()",
         [hashToken(sessionToken)],
       );
-      if (!rows[0]) throw new Error('Please verify your phone to recover your card.');
+      if (!rows[0])
+        throw new Error(
+          recoveryKeyMode()
+            ? 'Please sign in to recover your card.'
+            : 'Please verify your phone to recover your card.',
+        );
       return rows[0].principal_id;
     },
     async joinProgramme(
@@ -108,11 +139,21 @@ export function createCustomerService(db: Database, options = { development: fal
         );
         if (!programme.rows[0]) throw new Error('This programme is unavailable.');
         const shopId = programme.rows[0].shop_id;
+        const person = (
+          await tx.query<{ phone: string | null }>(
+            'SELECT phone FROM customers WHERE id=$1 FOR UPDATE',
+            [customerId],
+          )
+        ).rows[0];
+        if (!person) throw new Error('Customer not found or access denied.');
+        if (!person.phone && (consents.sms || consents.whatsapp))
+          throw new Error('Phone contact preferences are unavailable for this account.');
         const previous = await tx.query<{ id: string }>(
           'SELECT id FROM memberships WHERE customer_id=$1 AND programme_id=$2',
           [customerId, programmeId],
         );
         if (previous.rows[0]) return previous.rows[0];
+        if (productionMode()) await assertMerchantPrivacy(tx, shopId);
         if (programme.rows[0].shop_status !== 'active')
           throw new Error(
             'This shop has paused new enrolments. Existing cards can still be recovered.',
@@ -175,6 +216,20 @@ export function createCustomerService(db: Database, options = { development: fal
     ) {
       const card = await readMembership(db, membershipId, { customerId });
       await db.transaction(async (tx) => {
+        await tx.query('SELECT id FROM shops WHERE id=$1 FOR UPDATE', [card.shopId]);
+        const member = await tx.query(
+          "SELECT id FROM memberships WHERE id=$1 AND customer_id=$2 AND status='active' FOR UPDATE",
+          [membershipId, customerId],
+        );
+        if (!member.rows.length) throw new Error('Membership not found or access denied.');
+        const person = (
+          await tx.query<{ phone: string | null }>(
+            'SELECT phone FROM customers WHERE id=$1 FOR UPDATE',
+            [customerId],
+          )
+        ).rows[0];
+        if (!person?.phone && (preferences.sms || preferences.whatsapp))
+          throw new Error('Phone contact preferences are unavailable for this account.');
         for (const channel of ['sms', 'whatsapp'] as const)
           await tx.query(
             'INSERT INTO consents(id,membership_id,channel,opted_in) VALUES($1,$2,$3,$4)',
@@ -185,16 +240,35 @@ export function createCustomerService(db: Database, options = { development: fal
     },
     async requestDeletion(customerId: string, membershipId: string) {
       const card = await readMembership(db, membershipId, { customerId });
-      await db.query(
-        "INSERT INTO support_requests(id,shop_id,membership_id,kind,message) VALUES($1,$2,$3,'deletion',$4)",
-        [
-          id(),
-          card.shopId,
-          membershipId,
-          'Customer requests removal of personal data. Explain outstanding rewards and apply the documented retention policy before completing.',
-        ],
-      );
-      await auditEvent(db, card.shopId, customerId, 'deletion.requested', membershipId);
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT id FROM shops WHERE id=$1 FOR UPDATE', [card.shopId]);
+        const member = (
+          await tx.query<{ shop_id: string }>(
+            "SELECT shop_id FROM memberships WHERE id=$1 AND customer_id=$2 AND status='active' FOR UPDATE",
+            [membershipId, customerId],
+          )
+        ).rows[0];
+        if (!member) throw new Error('Membership not found or access denied.');
+        if (
+          (
+            await tx.query(
+              "SELECT id FROM support_requests WHERE membership_id=$1 AND kind='deletion' AND status='open'",
+              [membershipId],
+            )
+          ).rows.length
+        )
+          return;
+        await tx.query(
+          "INSERT INTO support_requests(id,shop_id,membership_id,kind,message) VALUES($1,$2,$3,'deletion',$4)",
+          [
+            id(),
+            member.shop_id,
+            membershipId,
+            'Customer requests removal of personal data. Explain outstanding rewards and apply the documented retention policy before completing.',
+          ],
+        );
+        await auditEvent(tx, member.shop_id, customerId, 'deletion.requested', membershipId);
+      });
     },
   };
 }

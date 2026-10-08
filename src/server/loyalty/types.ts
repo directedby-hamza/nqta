@@ -13,6 +13,7 @@ export type MembershipCard = {
   phone?: string;
   shopId: string;
   shopName: string;
+  shopStatus?: string;
   shopSlug: string;
   theme: string;
   location: string;

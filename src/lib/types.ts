@@ -11,6 +11,8 @@ export type Shop = {
   status: string;
   currency: string;
   subscription_status: string;
+  privacy_notice: string;
+  privacy_contact: string;
 };
 export type Programme = {
   id: string;

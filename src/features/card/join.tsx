@@ -8,7 +8,16 @@ import { useResource } from '@/lib/use-resource';
 import type { Shop, Programme } from '@/lib/types';
 import { ErrorNotice, Loading, Reveal } from '@/components/ui/primitives';
 import { Logo } from '@/components/layout/merchant-shell';
-export function Join({ slug }: { slug: string }) {
+import { PasswordAccount, type CustomerAccountMode } from './password-account';
+export function Join({
+  slug,
+  initialAccountMode,
+}: {
+  slug: string;
+  initialAccountMode?: CustomerAccountMode;
+}) {
+  const config = useResource<{ authMode: 'verified-contact' | 'recovery-key' }>('public/config');
+  const keyMode = config.data?.authMode === 'recovery-key';
   const { data, error, loading } = useResource<{
     shop: Shop;
     programme: Programme | null;
@@ -27,6 +36,13 @@ export function Join({ slug }: { slug: string }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
+  async function openCard() {
+    const member = await api<{ id: string }>('join', {
+      method: 'POST',
+      body: { programmeId: data?.programme?.id, name, consents: { sms: false, whatsapp: false } },
+    });
+    router.push(`/card/${member.id}?shop=${encodeURIComponent(slug)}`);
+  }
   async function request(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -67,15 +83,16 @@ export function Join({ slug }: { slug: string }) {
       </div>
       {data?.hostedTest && (
         <div className="notice warm">
-          Hosted testing · use sample names and phone numbers. Verification is simulated; no SMS is
-          sent.
+          {keyMode
+            ? 'Hosted testing · use sample account details. Save your recovery key; no messages are sent.'
+            : 'Hosted testing · use sample names and phone numbers. Verification is simulated; no SMS is sent.'}
         </div>
       )}
-      {loading ? (
+      {loading || config.loading ? (
         <Loading />
-      ) : error ? (
+      ) : error || config.error ? (
         <div className="join-form panel">
-          <ErrorNotice error={error} />
+          <ErrorNotice error={error || config.error} />
           <Link href="/recover" className="button quiet">
             Find your shop
           </Link>
@@ -124,6 +141,13 @@ export function Join({ slug }: { slug: string }) {
                 <div className="notice warm">
                   This shop is not accepting enrolments right now. Please check with the team.
                 </div>
+              ) : keyMode ? (
+                <PasswordAccount
+                  initialMode={initialAccountMode}
+                  name={name}
+                  onNameChange={setName}
+                  onAuthenticated={openCard}
+                />
               ) : !challenge ? (
                 <form onSubmit={request}>
                   <div className="field">
@@ -201,7 +225,9 @@ export function Join({ slug }: { slug: string }) {
                       <strong data-testid="development-code">{challenge.developmentCode}</strong>
                     </div>
                   ) : (
-                    <div className="notice">Your verification code was sent by SMS.</div>
+                    <div className="notice">
+                      Check your phone for the SMS code. Delivery can take a moment.
+                    </div>
                   )}
                   <div className="field">
                     <label htmlFor="verification-code">Verification code</label>
@@ -243,11 +269,20 @@ export function Join({ slug }: { slug: string }) {
                 <details className="join-terms">
                   <summary>Programme terms & privacy</summary>
                   <p>{data.programme.terms}</p>
+                  {data.shop.privacy_notice && <p>{data.shop.privacy_notice}</p>}
+                  {data.shop.privacy_contact && (
+                    <p>
+                      Privacy contact:{' '}
+                      <a href={`mailto:${data.shop.privacy_contact}`}>
+                        {data.shop.privacy_contact}
+                      </a>
+                    </p>
+                  )}
                   <p>
-                    We keep your verified phone, optional name, and loyalty activity to run this
-                    shop’s programme. Promotional choices are separate. You can withdraw them or
-                    request deletion from your card settings. A shop owner reviews deletion requests
-                    and any records that need retention.
+                    {keyMode
+                      ? 'We keep your account identifier, optional name, and loyalty activity to run this shop’s programme. You can request deletion from your card settings.'
+                      : 'We keep your verified phone, optional name, and loyalty activity to run this shop’s programme. Promotional choices are separate. You can withdraw them or request deletion from your card settings.'}{' '}
+                    A shop owner reviews deletion requests and any records that need retention.
                   </p>
                 </details>
               )}

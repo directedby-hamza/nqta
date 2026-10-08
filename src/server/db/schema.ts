@@ -1,4 +1,14 @@
-import { boolean, integer, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  bigserial,
+  boolean,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+} from 'drizzle-orm/pg-core';
 export const shops = pgTable('shops', {
   id: text('id').primaryKey(),
   slug: text('slug').notNull().unique(),
@@ -20,8 +30,32 @@ export const programmes = pgTable('programmes', {
 });
 export const customers = pgTable('customers', {
   id: text('id').primaryKey(),
-  phone: text('phone').notNull().unique(),
+  phone: text('phone').unique(),
   name: text('name').notNull().default(''),
+});
+export const customerCredentials = pgTable('customer_credentials', {
+  customerId: text('customer_id')
+    .primaryKey()
+    .references(() => customers.id),
+  accountId: text('account_id').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  recoveryKeyHash: text('recovery_key_hash').notNull().unique(),
+});
+export const staff = pgTable('staff', {
+  id: text('id').primaryKey(),
+  shopId: text('shop_id')
+    .notNull()
+    .references(() => shops.id),
+  name: text('name').notNull(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  role: text('role', { enum: ['owner', 'cashier'] }).notNull(),
+  active: boolean('active').notNull().default(true),
+  emailVerified: boolean('email_verified').notNull().default(false),
+  authMethod: text('auth_method', { enum: ['verified-contact', 'recovery-key'] })
+    .notNull()
+    .default('verified-contact'),
+  recoveryKeyHash: text('recovery_key_hash'),
 });
 export const memberships = pgTable('memberships', {
   id: text('id').primaryKey(),
@@ -48,3 +82,36 @@ export const events = pgTable('events', {
   reversed: boolean('reversed').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
 });
+export const walletPasses = pgTable(
+  'wallet_passes',
+  {
+    id: text('id').primaryKey(),
+    membershipId: text('membership_id')
+      .notNull()
+      .references(() => memberships.id),
+    provider: text('provider', { enum: ['google', 'apple'] }).notNull(),
+    externalId: text('external_id').notNull(),
+    revision: bigserial('revision', { mode: 'bigint' }).notNull().unique(),
+    syncedRevision: bigint('synced_revision', { mode: 'bigint' }).notNull().default(0n),
+    retryAt: timestamp('retry_at', { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer('attempts').notNull().default(0),
+    lockToken: text('lock_token'),
+    leaseUntil: timestamp('lease_until', { withTimezone: true }),
+    lockedRevision: bigint('locked_revision', { mode: 'bigint' }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique().on(table.membershipId, table.provider)],
+);
+export const walletDevices = pgTable(
+  'wallet_devices',
+  {
+    passId: text('pass_id')
+      .notNull()
+      .references(() => walletPasses.id, { onDelete: 'cascade' }),
+    deviceId: text('device_id').notNull(),
+    pushToken: text('push_token').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.passId, table.deviceId] })],
+);

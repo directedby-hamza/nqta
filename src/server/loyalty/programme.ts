@@ -3,6 +3,9 @@ import type { Actor } from './types';
 import { assertActor } from '../auth/permissions';
 import { auditEvent } from '../audit';
 import { id } from '../auth/crypto';
+import { productionMode } from '../environment';
+import { assertMerchantPrivacy } from '../privacy/service';
+import { enqueueShopWalletUpdates } from '../wallet/store';
 export type ProgrammeDraft = {
   id?: string;
   threshold: number;
@@ -54,6 +57,7 @@ export function createProgrammeService(db: Database) {
             ],
           );
           await auditEvent(tx, actor.shopId, actor.userId, 'programme.draft.updated', input.id);
+          await enqueueShopWalletUpdates(tx, actor.shopId);
           return { id: input.id, revision: saved.rows[0].revision };
         }
         const draftId = id();
@@ -75,6 +79,7 @@ export function createProgrammeService(db: Database) {
     async publishProgramme(actor: Actor, draftId: string, reviewedRevision: number): Promise<void> {
       await db.transaction(async (tx) => {
         await assertActor(tx, actor, true, true);
+        if (productionMode()) await assertMerchantPrivacy(tx, actor.shopId);
         const published = await tx.query(
           "SELECT id FROM programmes WHERE shop_id=$1 AND status='published'",
           [actor.shopId],
@@ -100,6 +105,7 @@ export function createProgrammeService(db: Database) {
           );
         await tx.query("UPDATE programmes SET status='published' WHERE id=$1", [draftId]);
         await auditEvent(tx, actor.shopId, actor.userId, 'programme.published', draftId);
+        await enqueueShopWalletUpdates(tx, actor.shopId);
       });
     },
     async pauseShop(actor: Actor, paused: boolean): Promise<void> {
@@ -116,6 +122,7 @@ export function createProgrammeService(db: Database) {
           paused ? 'shop.paused' : 'shop.resumed',
           actor.shopId,
         );
+        await enqueueShopWalletUpdates(tx, actor.shopId);
       });
     },
   };

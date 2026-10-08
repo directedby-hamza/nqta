@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-const origin = 'http://127.0.0.1:3000';
+const origin = `http://127.0.0.1:${Number(process.env.NQTA_E2E_PORT || 3000)}`;
 async function workspace(page: Page) {
   const slug = `review-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const response = await page.request.post('/api/auth/create-workspace', {

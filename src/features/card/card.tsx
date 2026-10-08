@@ -7,7 +7,14 @@ import type { MembershipCard } from '@/lib/types';
 import { api, ApiError, message } from '@/lib/api';
 import { ErrorNotice, Loading, Modal, QR, Reveal, Toast } from '@/components/ui/primitives';
 import { Logo } from '@/components/layout/merchant-shell';
+import { useResource } from '@/lib/use-resource';
+import { WalletActions } from './wallet-actions';
 export function CustomerCard({ id }: { id: string }) {
+  const config = useResource<{
+    authMode: 'verified-contact' | 'recovery-key';
+    wallet?: { google: boolean; apple: boolean };
+  }>('public/config');
+  const keyMode = config.data?.authMode === 'recovery-key';
   const [card, setCard] = useState<MembershipCard | null>(null);
   const [error, setError] = useState('');
   const [recover, setRecover] = useState(false);
@@ -30,9 +37,12 @@ export function CustomerCard({ id }: { id: string }) {
       const value = await api<MembershipCard>(`card/${id}`);
       setCard(value);
       setError('');
+      setRecover(false);
     } catch (e) {
       setError(message(e));
-      setRecover(e instanceof ApiError && e.status === 401);
+      const signedOut = e instanceof ApiError && e.status === 401;
+      setRecover(signedOut);
+      if (signedOut) setCard(null);
     }
   }
   useEffect(() => {
@@ -119,7 +129,13 @@ export function CustomerCard({ id }: { id: string }) {
         <div className="join-form panel">
           <div className="panel-body">
             <h2>Your progress is still here.</h2>
-            <p className="subtle">Verify the same phone to recover your card.</p>
+            <p className="subtle">
+              {keyMode
+                ? 'Sign in with your account ID and password, or use your saved recovery key.'
+                : config.data
+                  ? 'Verify the same phone to recover your card.'
+                  : 'Sign in through your shop to recover your card.'}
+            </p>
             <Link className="button primary wide" href="/recover">
               Recover my card <ArrowRight size={15} />
             </Link>
@@ -210,6 +226,11 @@ export function CustomerCard({ id }: { id: string }) {
               </div>
               <QR value={card.memberCode} size={116} />
             </div>
+            <WalletActions
+              membershipId={id}
+              options={config.data?.wallet}
+              active={card.status === 'active'}
+            />
             <div className="card-rewards">
               <div className="between">
                 <h2>Your little rewards</h2>
@@ -265,8 +286,11 @@ export function CustomerCard({ id }: { id: string }) {
               <p>{card.eligibility}</p>
               <p>{card.terms}</p>
               <p>
-                Earned rewards do not expire automatically in this pilot. A reward-only receipt does
-                not earn a stamp. Lost your card? Verify the same phone on the shop enrolment page.
+                Earned rewards do not expire automatically. A reward-only receipt does not earn a
+                stamp.{' '}
+                {card.phone
+                  ? 'Lost your card? Verify the same phone on the shop enrolment page.'
+                  : 'Lost your card? Use your account ID and password on the shop enrolment page, or use your saved recovery key.'}
               </p>
             </details>
             <div className="card-saved">
@@ -317,29 +341,38 @@ export function CustomerCard({ id }: { id: string }) {
         open={settings}
         onOpenChange={setSettings}
         title="Your card, your choices."
-        description={`Manage your preferences with ${card?.shopName || 'this shop'}.`}
+        description={`Manage your card with ${card?.shopName || 'this shop'}.`}
       >
         <div className="stack">
-          <label className="checkbox">
-            <input type="checkbox" checked={sms} onChange={(e) => setSms(e.target.checked)} />
-            Promotional SMS from this shop
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={whatsapp}
-              onChange={(e) => setWhatsapp(e.target.checked)}
-            />
-            Promotional WhatsApp from this shop
-          </label>
-          <p className="subtle">
-            Optional. Your membership and rewards work without either choice.
-          </p>
+          {card?.phone ? (
+            <>
+              <label className="checkbox">
+                <input type="checkbox" checked={sms} onChange={(e) => setSms(e.target.checked)} />
+                Promotional SMS from this shop
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={whatsapp}
+                  onChange={(e) => setWhatsapp(e.target.checked)}
+                />
+                Promotional WhatsApp from this shop
+              </label>
+              <p className="subtle">
+                Optional. Your membership and rewards work without either choice.
+              </p>
+              <button className="button primary wide" disabled={busy} onClick={() => void save()}>
+                Save my choices
+              </button>
+              <div className="divider" />
+            </>
+          ) : (
+            <p className="subtle">
+              Your membership and rewards are saved to your account. Keep your account ID and
+              recovery key private; ask the shop team if you need assistance.
+            </p>
+          )}
           <ErrorNotice error={modalError} />
-          <button className="button primary wide" disabled={busy} onClick={() => void save()}>
-            Save my choices
-          </button>
-          <div className="divider" />
           {deleting ? (
             <>
               <div className="notice warm">

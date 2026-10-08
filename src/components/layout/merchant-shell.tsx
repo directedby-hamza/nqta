@@ -125,7 +125,7 @@ export function MerchantShell({ children }: { children: ReactNode }) {
             <div className="side-note">
               <span className="badge">
                 <Leaf size={11} />
-                {workspace.shop.subscription_status}
+                {workspace.development ? workspace.shop.subscription_status : 'Shop workspace'}
               </span>
               <h3>
                 A little loyalty.

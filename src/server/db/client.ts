@@ -5,9 +5,15 @@ import { Pool, type PoolClient } from 'pg';
 import * as schema from './schema';
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
-import { assertHostedTestConfiguration, demoMode, hostedTestMode } from '../environment';
+import {
+  assertRuntimeConfiguration,
+  demoMode,
+  hostedTestMode,
+  productionMode,
+} from '../environment';
 
 export interface Database {
+  dialect?: 'postgres' | 'pglite';
   query<T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<{ rows: T[] }>;
   transaction<T>(operation: (db: Database) => Promise<T>): Promise<T>;
   close(): Promise<void>;
@@ -17,6 +23,7 @@ export async function createDatabase(location?: string): Promise<Database> {
   if (location?.startsWith('postgres')) {
     const pool = new Pool({ connectionString: location });
     const wrap = (connection: Pool | PoolClient): Database => ({
+      dialect: 'postgres',
       query: async <T>(sql: string, values: unknown[] = []) => ({
         rows: (await connection.query(sql, values)).rows as T[],
       }),
@@ -45,12 +52,14 @@ export async function createDatabase(location?: string): Promise<Database> {
   const client = new PGlite(location);
   await client.waitReady;
   const db: Database = {
+    dialect: 'pglite',
     query: async <T>(sql: string, values: unknown[] = []) => ({
       rows: (await client.query(sql, values)).rows as T[],
     }),
     transaction: async (operation) =>
       client.transaction(async (tx) =>
         operation({
+          dialect: 'pglite',
           query: async <T>(sql: string, values: unknown[] = []) => ({
             rows: (await tx.query(sql, values)).rows as T[],
           }),
@@ -71,18 +80,27 @@ const globalDb = globalThis as unknown as { nqtaDatabase?: Promise<Database> };
 export function getDatabase(): Promise<Database> {
   if (!globalDb.nqtaDatabase) {
     globalDb.nqtaDatabase = (async () => {
-      assertHostedTestConfiguration();
+      assertRuntimeConfiguration();
       const location =
         process.env.DATABASE_URL ||
         path.resolve(process.cwd(), process.env.DATA_DIRECTORY || '.data/nqta');
       const db = await createDatabase(location);
-      const { migrate } = await import('./migrate');
-      await migrate(db);
-      if (demoMode() && !hostedTestMode()) {
-        const { seedDemo } = await import('./seed');
-        await seedDemo(db);
+      try {
+        const { migrate } = await import('./migrate');
+        await migrate(db);
+        if (productionMode()) {
+          const { checkForDemoData } = await import('./check');
+          await checkForDemoData(db);
+        }
+        if (demoMode() && !hostedTestMode()) {
+          const { seedDemo } = await import('./seed');
+          await seedDemo(db);
+        }
+        return db;
+      } catch (error) {
+        await db.close().catch(() => {});
+        throw error;
       }
-      return db;
     })().catch((error) => {
       delete globalDb.nqtaDatabase;
       throw error;
