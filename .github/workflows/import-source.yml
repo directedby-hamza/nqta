@@ -1,4 +1,4 @@
-# Snapshot: cdece4991bd11634fe8f7891e84891efdea140d4 (198 tracked source files).
+# Snapshot: fded5f2f85941cb855d52544635a9e6c08e477a9 (202 tracked source files).
 # Publish this version only on feat/native-wallet-cards, at .github/workflows/import-source.yml.
 name: Import verified Nqta source
 
@@ -37,7 +37,7 @@ jobs:
           import zipfile
 
           archive = Path('Nqta-Wallet-Source.zip')
-          expected_hash = 'e91b24d2a761faad6f43bded528c2915570eb4b1e1627f13b39d7c14618d2f53'
+          expected_hash = '7c7cbf838f3318d1681b2c3f105d6b4ec2fce7fb75f614b5d579b3ed60d4cb3b'
           if hashlib.sha256(archive.read_bytes()).hexdigest() != expected_hash:
               raise SystemExit('Source archive SHA-256 does not match.')
 
@@ -76,8 +76,8 @@ jobs:
                       raise SystemExit('Source file exceeds the expected size limit.')
                   files[relative] = (target, source.read(entry), mode & 0o777)
 
-          if len(files) != 198:
-              raise SystemExit('Expected exactly 198 source files.')
+          if len(files) != 202:
+              raise SystemExit('Expected exactly 202 source files.')
           required = {'package.json', 'package-lock.json', 'render.yaml', 'tsconfig.json', '.env.example'}
           if not required.issubset(files):
               raise SystemExit('Required source files are missing.')
@@ -104,7 +104,7 @@ jobs:
                           '--pathspec-from-file=' + str(manifest), '--pathspec-file-nul'], check=True)
           if subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--', '.github/']):
               raise SystemExit('Workflow files must remain unchanged.')
-          print('Imported and verified all 198 Wallet source files; removed the source archive.')
+          print('Imported and verified all 202 Wallet source files; removed the source archive.')
           PY
 
       - name: Commit and push the imported source
@@ -120,5 +120,5 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Import verified simple customer access source cdece499'
+          git commit -m 'Import verified simple customer access source fded5f2f'
           git push origin HEAD:refs/heads/feat/native-wallet-cards
