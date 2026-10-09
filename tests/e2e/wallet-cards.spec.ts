@@ -1,20 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
+import { randomInt } from 'node:crypto';
 test.skip(process.env.AUTH_MODE !== 'recovery-key', 'Uses explicit password/key accounts.');
 
 async function createShopCard(page: Page) {
   await page.goto('/join/morrow');
+  await page.getByText('Your details (optional)', { exact: true }).click();
   await page.getByLabel('First name').fill('Mina Card');
-  await page.getByLabel('Phone number', { exact: true }).fill('+212600002015');
-  await page.getByLabel('Email address', { exact: true }).fill('mina.wallet@example.com');
+  await page
+    .getByLabel('Phone number', { exact: true })
+    .fill(`06${randomInt(10000000, 100000000)}`);
+  await page.getByLabel(/Email address/).fill('mina.card@example.com');
   await page.getByLabel('Password', { exact: true }).fill('PrivateWalletCode123!');
   await page.getByRole('button', { name: 'Save my card', exact: true }).click();
-  const key = await page.getByLabel('Recovery key', { exact: true }).inputValue();
-  expect(key.length).toBeGreaterThanOrEqual(32);
-  expect(
-    await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage })),
-  ).not.toContain(key);
-  await page.getByLabel('I have saved my account ID and recovery key').check();
-  return key;
+  await expect(page).toHaveURL(/\/card\//);
+  await expect(page.getByLabel('Recovery key', { exact: true })).toHaveCount(0);
 }
 
 test('invalid contact details are corrected before creating a password account', async ({
@@ -25,13 +24,12 @@ test('invalid contact details are corrected before creating a password account',
     if (request.url().endsWith('/api/auth/customer/register')) registrations++;
   });
   await page.goto('/join/morrow');
-  await page.getByLabel('Phone number', { exact: true }).fill('0600002015');
-  await page.getByLabel('Email address', { exact: true }).fill('mina.wallet@example.com');
+  await page.getByLabel('Phone number', { exact: true }).fill('12345');
   await page.getByLabel('Password', { exact: true }).fill('PrivateWalletCode123!');
   await page.getByRole('button', { name: 'Save my card', exact: true }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'country code' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'valid phone number' })).toBeVisible();
   expect(registrations).toBe(0);
-  await expect(page.getByLabel('Phone number', { exact: true })).toHaveValue('0600002015');
+  await expect(page.getByLabel('Phone number', { exact: true })).toHaveValue('12345');
   await expect(page.getByLabel('Recovery key', { exact: true })).toHaveCount(0);
 });
 
@@ -45,7 +43,6 @@ test('new enrolment saves a web card without Wallet requests', async ({ page }) 
     0,
   );
   await expect(page.getByText(/Apple Wallet|Google Wallet/)).toHaveCount(0);
-  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
   await expect(page.getByTestId('stamp-progress')).toBeVisible();
   const id = new URL(page.url()).pathname.split('/').pop()!;
   const saved = await (await page.request.get('/api/card/' + id)).json();

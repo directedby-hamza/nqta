@@ -20,7 +20,7 @@ export function normalisePhone(value: string) {
 // or populate the verified-contact identity in customers.phone.
 export const joinContactsSchema = z.object({
   phone: z.string().max(100).transform(normalisePhone),
-  email: z.string().trim().toLowerCase().max(200).pipe(z.email()),
+  email: z.string().trim().toLowerCase().max(200).pipe(z.email()).optional(),
 });
 export type JoinContacts = z.input<typeof joinContactsSchema>;
 export function createCustomerService(db: Database, options = { development: false }) {

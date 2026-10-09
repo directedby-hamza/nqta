@@ -6,7 +6,9 @@ import { createCustomerService, joinContactsSchema } from '@/server/auth/custome
 import {
   createCustomerPasswordService,
   CustomerCredentialError,
+  CustomerLoginUnavailableError,
 } from '@/server/auth/customer-password';
+import { createCustomerAccessService } from '@/server/auth/customer-access';
 import { createStaffKeyRecoveryService } from '@/server/auth/staff-key-recovery';
 import { createWorkspace } from '@/server/auth/onboarding';
 import { applicationOrigin, trustedOrigin } from '@/server/auth/origin';
@@ -98,6 +100,8 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       'auth/customer/sign-in',
       'auth/customer/recover',
       'auth/customer/rotate-recovery-key',
+      'auth/customer/account',
+      'auth/customer/login-phone',
       'auth/staff/recover-key',
     ];
     if ((keyMode && contactRoutes.includes(route)) || (!keyMode && keyRoutes.includes(route)))
@@ -357,6 +361,13 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       if (value) await auth.signOut(value);
       return session(json({ ok: true }), name, '', 0);
     }
+    if (route === 'auth/customer/account' && method === 'GET')
+      return json(await passwordCustomers.getAccount(await customer()));
+    if (route === 'auth/customer/login-phone' && method === 'POST') {
+      const input = z.object({ phone: text, password: z.string().min(1).max(200) }).parse(body);
+      await passwordCustomers.setLoginPhone(await customer(), input.phone, input.password);
+      return json({ ok: true });
+    }
     if (keyRoutes.includes(route) && route.startsWith('auth/customer/') && method === 'POST') {
       await reserveLimit(db, {
         scope: 'customer-key-auth-global',
@@ -365,13 +376,20 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
         windowSeconds: 900,
       });
       if (route === 'auth/customer/register') {
-        const input = z.object({ password: z.string().min(10).max(200) }).parse(body);
+        const input = z
+          .object({ password: z.string().min(10).max(200), phone: text.optional() })
+          .parse(body);
+        if (input.phone !== undefined) {
+          const result = await passwordCustomers.register(input.password, input.phone);
+          return session(json({ ok: true }), 'nqta_customer', result.token, 90);
+        }
+        // Keep already deployed clients compatible; the current signup always supplies phone.
         const result = await passwordCustomers.register(input.password);
         return session(
           json({ ok: true, accountId: result.accountId, recoveryKey: result.recoveryKey }),
           'nqta_customer',
           result.token,
-          30,
+          90,
         );
       }
       if (route === 'auth/customer/rotate-recovery-key') {
@@ -391,16 +409,21 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       }
       const input = z
         .object({
-          accountId: z.string().trim().min(1).max(100),
+          accountId: z.string().trim().min(1).max(100).optional(),
+          phone: text.optional(),
           password: z
             .string()
             .min(route === 'auth/customer/recover' ? 10 : 1)
             .max(200),
           recoveryKey: z.string().min(1).max(200).optional(),
         })
+        .refine((input) => Boolean(input.accountId) !== Boolean(input.phone), {
+          message: 'Enter your phone number or previous account ID.',
+        })
         .parse(body);
       try {
         if (route === 'auth/customer/recover') {
+          if (!input.accountId) throw new HttpError('Enter your previous account ID.', 400);
           if (!input.recoveryKey) throw new HttpError('Enter your saved recovery key.', 400);
           const result = await passwordCustomers.recover(
             input.accountId,
@@ -411,11 +434,14 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
             json({ ok: true, accountId: result.accountId, recoveryKey: result.recoveryKey }),
             'nqta_customer',
             result.token,
-            30,
+            90,
           );
         }
-        const result = await passwordCustomers.signIn(input.accountId, input.password);
-        return session(json({ ok: true }), 'nqta_customer', result.token, 30);
+        const result = await passwordCustomers.signIn(
+          input.phone || input.accountId!,
+          input.password,
+        );
+        return session(json({ ok: true }), 'nqta_customer', result.token, 90);
       } catch (error) {
         if (error instanceof CustomerCredentialError)
           throw new HttpError('The account credentials are incorrect.', 401);
@@ -468,6 +494,17 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
     }
     if (route.startsWith('card/') && method === 'GET')
       return json(await customers.getCard(await customer(), route.slice(5)));
+    if (route.startsWith('customer/shop/') && method === 'GET') {
+      const customerId = await customer();
+      const found = await createCustomerAccessService(db).lookup(
+        customerId,
+        route.slice('customer/shop/'.length),
+      );
+      const account = keyMode
+        ? await passwordCustomers.getAccount(customerId)
+        : { loginPhone: null };
+      return json({ ...found, ...account });
+    }
     if (route === 'challenge' && method === 'POST')
       return json(
         await customers.createRedemptionChallenge(
@@ -734,6 +771,11 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
     }
     throw new HttpError('This action could not be found.', 404);
   } catch (error) {
+    if (error instanceof CustomerLoginUnavailableError)
+      return NextResponse.json(
+        { error: error.message },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } },
+      );
     if (error instanceof CustomerCredentialError)
       return NextResponse.json(
         { error: 'The account credentials are incorrect.' },

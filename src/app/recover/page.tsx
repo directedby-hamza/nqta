@@ -27,7 +27,7 @@ export default function Page() {
           <p className="subtle" style={{ margin: '16px 0' }}>
             Enter your shop’s URL name, or scan its enrolment QR again.{' '}
             {keyMode
-              ? 'Use your account ID and password to restore your saved card and rewards. If you forgot your password, use your saved recovery key.'
+              ? 'On this browser, your saved card opens directly while you’re signed in. On another device, use your phone number and password. Previous account IDs also work.'
               : config.data
                 ? 'Verify the same phone to restore your saved card and rewards.'
                 : 'Sign in through your shop to restore your saved card and rewards.'}

@@ -1,327 +1,242 @@
+import { randomInt, randomUUID } from 'node:crypto';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-test.skip(
-  process.env.AUTH_MODE !== 'recovery-key',
-  'Uses the explicit recovery-key configuration.',
-);
+test.skip(process.env.AUTH_MODE !== 'recovery-key', 'Uses phone and password accounts.');
 
-async function secretStorage(page: Page) {
-  return page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
+const password = 'PrivateCustomerPassword123!';
+const phone = () => `06${randomInt(10000000, 100000000)}`;
+const international = (value: string) => `+212${value.slice(1)}`;
+
+async function post(request: APIRequestContext, origin: string, path: string, data: unknown) {
+  return request.post(`/api/${path}`, { headers: { origin }, data });
 }
 
-async function fillShopContacts(page: Page) {
-  await page.getByLabel('Phone number', { exact: true }).fill('+212600002011');
-  await page.getByLabel('Email address', { exact: true }).fill('password.customer@example.com');
+async function merchantSignIn(page: Page) {
+  await page.goto('/sign-in');
+  await page.getByRole('button', { name: 'Explore demo workspace', exact: true }).click();
+  await expect(page).toHaveURL(/overview/);
 }
 
-test('a password account keeps the same purchased card across browsers and rotates recovery credentials', async ({
+test('a legacy customer enables phone sign-in without changing the earned card or using its contact number', async ({
   browser,
 }, testInfo) => {
-  // A public member code must never replace the private account identifier or recovery key.
   const origin = String(testInfo.project.use.baseURL);
-  const first = await browser.newContext({ viewport: { width: 390, height: 844 } });
-  const second = await browser.newContext({ reducedMotion: 'reduce' });
-  const recovered = await browser.newContext();
-  const merchant = await browser.newContext();
-  const outsider = await browser.newContext();
-  async function post(request: APIRequestContext, path: string, data: unknown) {
-    return request.post(`/api/${path}`, { headers: { origin }, data });
-  }
+  const legacy = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    reducedMotion: 'reduce',
+  });
+  const restored = await browser.newContext({ reducedMotion: 'reduce' });
+  const merchant = await browser.newContext({ reducedMotion: 'reduce' });
+  const declaredPhone = international(phone());
+  const loginPhone = phone();
   try {
-    const shop = await first.request.get('/api/public/shop/morrow', { timeout: 60000 });
-    expect(shop.ok()).toBe(true);
-    const customer = await first.newPage();
-    await customer.goto('/join/morrow');
-    await expect(
-      customer.getByRole('heading', { name: 'Morrow Coffee', exact: true }),
-    ).toBeVisible();
-    await expect(customer.getByLabel('Password', { exact: true })).toBeVisible();
-    await expect(customer.getByLabel('Phone number')).toBeVisible();
-    await expect(customer.getByLabel('Email address')).toBeVisible();
-    await fillShopContacts(customer);
-    await customer.getByLabel('First name').fill('Password Customer');
-    await customer.getByLabel('Password', { exact: true }).fill('OriginalCustomerPassword123!');
-    await customer.getByRole('button', { name: 'Save my card', exact: true }).click();
-    const accountId = await customer.getByLabel('Account ID', { exact: true }).inputValue();
-    const originalKey = await customer.getByLabel('Recovery key', { exact: true }).inputValue();
-    expect(accountId).toBeTruthy();
-    expect(originalKey.length).toBeGreaterThanOrEqual(32);
-    await expect(
-      customer.getByRole('button', { name: 'Save my card', exact: true }),
-    ).toBeDisabled();
-    expect((await secretStorage(customer)).includes(originalKey)).toBe(false);
-    expect(customer.url().includes(originalKey)).toBe(false);
-    const downloaded = customer.waitForEvent('download');
-    await customer.getByRole('button', { name: 'Download recovery details', exact: true }).click();
-    const stream = await (await downloaded).createReadStream();
-    let saved = '';
-    for await (const chunk of stream!) saved += chunk.toString();
-    expect(saved.includes(accountId)).toBe(true);
-    expect(saved.includes(originalKey)).toBe(true);
-    await customer.getByLabel('I have saved my account ID and recovery key').check();
-    await customer.getByRole('button', { name: 'Save my card', exact: true }).click();
-    await expect(customer.getByTestId('stamp-progress')).toBeVisible();
-    const cardId = new URL(customer.url()).pathname.split('/').pop()!;
-    const card = await (await first.request.get(`/api/card/${cardId}`)).json();
-    expect(card.totalStamps).toBe(0);
-    expect(card.phone).toBeUndefined();
-    expect(card.consents).toEqual({ sms: false, whatsapp: false });
-    await customer.getByRole('button', { name: 'Card settings' }).click();
-    await expect(customer.getByLabel('Promotional SMS from this shop')).toHaveCount(0);
-    await expect(
-      customer.getByRole('button', { name: 'Request deletion of my personal data' }),
-    ).toBeVisible();
-    await customer.getByRole('button', { name: 'Close dialog' }).click();
-    expect((await outsider.request.get(`/api/card/${cardId}`)).status()).toBe(401);
-    expect(
-      (
-        await post(outsider.request, 'auth/customer/sign-in', {
-          accountId: card.memberCode,
-          password: 'OriginalCustomerPassword123!',
-        })
-      ).ok(),
-    ).toBe(false);
-    expect(
-      (
-        await post(outsider.request, 'auth/customer/recover', {
-          accountId,
-          recoveryKey: card.memberCode,
-          password: 'WrongPublicCodePassword123!',
-        })
-      ).ok(),
-    ).toBe(false);
+    // These credentials represent an existing customer from the previous release.
+    const registration = await post(legacy.request, origin, 'auth/customer/register', { password });
+    expect(registration.ok()).toBe(true);
+    const oldAccount = await registration.json();
+    expect(oldAccount.accountId).toMatch(/^NA-/);
+    expect(oldAccount.recoveryKey.length).toBeGreaterThanOrEqual(32);
+    expect(await (await legacy.request.get('/api/auth/customer/account')).json()).toEqual({
+      loginPhone: null,
+    });
+    const shopResponse = await legacy.request.get('/api/public/shop/morrow');
+    expect(shopResponse.ok()).toBe(true);
+    const shop = await shopResponse.json();
+    const joined = await post(legacy.request, origin, 'join', {
+      programmeId: shop.programme.id,
+      name: 'Existing Phone Customer',
+      contacts: { phone: declaredPhone, email: 'existing.customer@example.com' },
+      consents: { sms: false, whatsapp: false },
+    });
+    expect(joined.ok()).toBe(true);
+    const membershipId = (await joined.json()).id;
+    const before = await (await legacy.request.get(`/api/card/${membershipId}`)).json();
 
     const cashier = await merchant.newPage();
-    await cashier.goto('/sign-in');
-    await cashier.getByRole('button', { name: 'Explore demo workspace' }).click();
-    await expect(cashier).toHaveURL(/overview/);
-    await cashier.goto(`/cashier?member=${card.memberCode}`);
-    await expect(cashier.getByText('Password Customer', { exact: true }).first()).toBeVisible();
-    await cashier.getByLabel('Purchase amount (MAD)').fill('25');
-    await cashier.getByRole('button', { name: 'Review purchase' }).click();
-    await cashier.getByRole('button', { name: 'Confirm purchase', exact: true }).click();
-    await expect(cashier.getByText('Purchase recorded', { exact: true })).toBeVisible();
+    await merchantSignIn(cashier);
+    const purchase = await post(merchant.request, origin, 'purchases', {
+      membershipId,
+      idempotencyKey: `legacy-phone-${randomUUID()}`,
+      qualifies: true,
+      amountMinor: 2500,
+    });
+    expect(purchase.ok()).toBe(true);
 
-    const restored = await second.newPage();
-    await restored.goto('/join/morrow');
-    await restored.getByRole('button', { name: 'Sign in to my account', exact: true }).click();
-    await restored.getByLabel('Account ID', { exact: true }).fill(accountId);
-    await restored.getByLabel('Password', { exact: true }).fill('OriginalCustomerPassword123!');
-    await restored.getByRole('button', { name: 'Sign in and open my card', exact: true }).click();
-    await expect(restored).toHaveURL(new RegExp(`/card/${cardId}`));
-    await expect(restored.getByTestId('stamp-progress')).toHaveAttribute(
+    const card = await legacy.newPage();
+    await card.goto(`/card/${membershipId}?shop=morrow`);
+    await expect(card.getByTestId('stamp-progress')).toHaveAttribute(
       'aria-label',
       '1 of 5 stamps in this cycle',
     );
-
-    const reset = await recovered.newPage();
-    await reset.goto('/join/morrow');
-    await reset.getByRole('button', { name: 'Use a recovery key', exact: true }).click();
-    await reset.getByLabel('Account ID', { exact: true }).fill(accountId);
-    await reset.getByLabel('Recovery key', { exact: true }).fill(originalKey);
-    await reset.getByLabel('New password', { exact: true }).fill('ChangedCustomerPassword123!');
-    await reset.getByLabel('Confirm password', { exact: true }).fill('ChangedCustomerPassword123!');
-    await reset.getByRole('button', { name: 'Reset password', exact: true }).click();
-    await expect(reset.getByRole('button', { name: 'Open my card', exact: true })).toBeDisabled();
-    const newKey = await reset.getByLabel('Recovery key', { exact: true }).inputValue();
-    expect(newKey !== originalKey).toBe(true);
-    expect((await secretStorage(reset)).includes(newKey)).toBe(false);
-    await reset.getByLabel('I have saved my account ID and recovery key').check();
-    await reset.getByRole('button', { name: 'Open my card', exact: true }).click();
-    await expect(reset).toHaveURL(new RegExp(`/card/${cardId}`));
-    expect((await first.request.get(`/api/card/${cardId}`)).status()).toBe(401);
-    expect((await second.request.get(`/api/card/${cardId}`)).status()).toBe(401);
-    expect(
-      (
-        await post(outsider.request, 'auth/customer/sign-in', {
-          accountId,
-          password: 'OriginalCustomerPassword123!',
-        })
-      ).ok(),
-    ).toBe(false);
-    expect(
-      (
-        await post(outsider.request, 'auth/customer/recover', {
-          accountId,
-          recoveryKey: originalKey,
-          password: 'ReplayPassword123!',
-        })
-      ).ok(),
-    ).toBe(false);
-    expect(
-      (
-        await post(outsider.request, 'auth/customer/sign-in', {
-          accountId,
-          password: 'ChangedCustomerPassword123!',
-        })
-      ).ok(),
-    ).toBe(true);
-    expect((await outsider.request.get(`/api/card/${cardId}`)).status()).toBe(200);
-    const nextRecovery = await post(outsider.request, 'auth/customer/recover', {
-      accountId,
-      recoveryKey: newKey,
-      password: 'NextCustomerPassword123!',
+    await expect(card.getByRole('region', { name: 'Your checkout QR' }).locator('code')).toHaveText(
+      before.memberCode,
+    );
+    await card.getByRole('button', { name: 'Card settings' }).click();
+    const settings = card.getByRole('dialog', { name: 'Your card, your choices.' });
+    await expect(
+      settings.getByRole('heading', { name: 'Use my phone to sign in', exact: true }),
+    ).toBeVisible();
+    await expect(settings.getByLabel('Phone number', { exact: true })).toHaveValue('');
+    await expect(settings.getByLabel('Account ID', { exact: true })).toHaveCount(0);
+    await expect(settings.getByLabel('Recovery key', { exact: true })).toHaveCount(0);
+    await settings.getByLabel('Phone number', { exact: true }).fill(loginPhone);
+    await settings
+      .getByLabel('Current password', { exact: true })
+      .fill('WrongCustomerPassword123!');
+    const denied = card.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/auth/customer/login-phone') &&
+        response.request().method() === 'POST',
+    );
+    await settings.getByRole('button', { name: 'Enable phone sign-in', exact: true }).click();
+    expect((await denied).status()).toBe(401);
+    await expect(
+      settings.getByRole('alert').filter({ hasText: 'credentials are incorrect' }),
+    ).toBeVisible();
+    await expect(settings.getByLabel('Current password', { exact: true })).toHaveValue('');
+    expect(await (await legacy.request.get('/api/auth/customer/account')).json()).toEqual({
+      loginPhone: null,
     });
-    expect(nextRecovery.ok()).toBe(true);
-    expect((await nextRecovery.json()).recoveryKey !== newKey).toBe(true);
-    expect((await outsider.request.get(`/api/card/${cardId}`)).status()).toBe(200);
+
+    await settings.getByLabel('Current password', { exact: true }).fill(password);
+    await settings.getByRole('button', { name: 'Enable phone sign-in', exact: true }).click();
+    await expect(settings.getByRole('status')).toContainText('Phone sign-in is enabled');
+    await expect(
+      settings.getByRole('button', { name: 'Enable phone sign-in', exact: true }),
+    ).toHaveCount(0);
+    expect(await (await legacy.request.get('/api/auth/customer/account')).json()).toEqual({
+      loginPhone: international(loginPhone),
+    });
+    const stored = await card.evaluate(() =>
+      JSON.stringify({ ...localStorage, ...sessionStorage }),
+    );
+    expect(stored.includes(password)).toBe(false);
+    expect(stored.includes(oldAccount.recoveryKey)).toBe(false);
+
+    expect((await restored.request.get(`/api/card/${membershipId}`)).status()).toBe(401);
+    const nextVisit = await restored.newPage();
+    await nextVisit.goto('/join/morrow');
+    await nextVisit.getByRole('button', { name: 'Sign in to my account', exact: true }).click();
+    await nextVisit
+      .getByLabel('Phone number or account ID', { exact: true })
+      .fill(international(loginPhone));
+    await nextVisit.getByLabel('Password', { exact: true }).fill(password);
+    await nextVisit.getByRole('button', { name: 'Sign in and open my card', exact: true }).click();
+    await expect(nextVisit).toHaveURL(new RegExp(`/card/${membershipId}(?:\\?|$)`));
+    await expect(
+      nextVisit.getByRole('region', { name: 'Your checkout QR' }).locator('code'),
+    ).toHaveText(before.memberCode);
+    await expect(nextVisit.getByTestId('stamp-progress')).toHaveAttribute(
+      'aria-label',
+      '1 of 5 stamps in this cycle',
+    );
+    const after = await (await restored.request.get(`/api/card/${membershipId}`)).json();
+    expect(after.id).toBe(membershipId);
+    expect(after.memberCode).toBe(before.memberCode);
+    expect(after.totalStamps).toBe(1);
   } finally {
-    await Promise.all([
-      first.close(),
-      second.close(),
-      recovered.close(),
-      merchant.close(),
-      outsider.close(),
-    ]);
+    await Promise.all([legacy.close(), restored.close(), merchant.close()]);
   }
 });
 
-test('reloading the one-time key step offers password-confirmed replacement without persisting the key', async ({
-  page,
-  request,
-}, testInfo) => {
-  expect((await request.get('/api/public/shop/morrow', { timeout: 60000 })).ok()).toBe(true);
-  let joinBody: Record<string, unknown> | undefined;
-  let registrations = 0;
-  page.on('request', (request) => {
-    if (request.url().endsWith('/api/join') && request.method() === 'POST')
-      joinBody = request.postDataJSON();
-    if (request.url().endsWith('/api/auth/customer/register')) registrations++;
-  });
-  await page.goto('/join/morrow');
-  await fillShopContacts(page);
-  await page.getByLabel('Password', { exact: true }).fill('ReloadCustomerPassword123!');
-  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
-  const accountId = await page.getByLabel('Account ID', { exact: true }).inputValue();
-  const originalKey = await page.getByLabel('Recovery key', { exact: true }).inputValue();
-  expect((await secretStorage(page)).includes(originalKey)).toBe(false);
-  await page.reload();
-  await expect(
-    page.getByRole('heading', { name: 'Your recovery key was shown once.' }),
-  ).toBeVisible();
-  await expect(page.getByLabel('Recovery key', { exact: true })).toHaveCount(0);
-  await page.getByLabel('Password', { exact: true }).fill('ReloadCustomerPassword123!');
-  await page.getByRole('button', { name: 'Make a replacement recovery key', exact: true }).click();
-  const newKey = await page.getByLabel('Recovery key', { exact: true }).inputValue();
-  expect(newKey !== originalKey).toBe(true);
-  await expect(page.getByLabel('Account ID', { exact: true })).toHaveValue(accountId);
-  await expect(page.getByLabel('Phone number', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Phone number', { exact: true })).toHaveValue('');
-  await expect(page.getByLabel('Email address', { exact: true })).toHaveValue('');
-  expect((await secretStorage(page)).includes(newKey)).toBe(false);
-  const oldRecovery = await request.post('/api/auth/customer/recover', {
-    headers: { origin: String(testInfo.project.use.baseURL) },
-    data: { accountId, recoveryKey: originalKey, password: 'OldKeyReplayPassword123!' },
-  });
-  expect(oldRecovery.ok()).toBe(false);
-  await page.getByLabel('I have saved my account ID and recovery key').check();
-  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'country code' })).toBeVisible();
-  expect(joinBody).toBeUndefined();
-  await page.getByLabel('Phone number', { exact: true }).fill('+212600002011');
-  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'valid email address' })).toBeVisible();
-  expect(joinBody).toBeUndefined();
-  await page.getByLabel('Email address', { exact: true }).fill('password.customer@example.com');
-  await page.getByRole('button', { name: 'Save my card', exact: true }).click();
-  await expect(page.getByTestId('stamp-progress')).toBeVisible();
-  expect(registrations).toBe(1);
-  expect(joinBody?.contacts).toEqual({
-    phone: '+212600002011',
-    email: 'password.customer@example.com',
-  });
-  const stored = await secretStorage(page);
-  expect(stored).not.toContain(newKey);
-  expect(stored).not.toContain('password.customer@example.com');
-  expect(
-    await page.evaluate(() => sessionStorage.getItem('nqta.customer-shop-enrollment')),
-  ).toBeNull();
-});
-
-test('an interrupted key save cannot rotate another account signed in from a second tab', async ({
-  browser,
-}, testInfo) => {
-  const customer = await browser.newContext();
-  const recovery = await browser.newContext();
-  const origin = String(testInfo.project.use.baseURL);
-  const password = 'SharedTabCustomerPassword123!';
-  try {
-    expect((await customer.request.get('/api/public/shop/morrow', { timeout: 60000 })).ok()).toBe(
-      true,
-    );
-    const firstTab = await customer.newPage();
-    await firstTab.goto('/join/morrow');
-    await fillShopContacts(firstTab);
-    await firstTab.getByLabel('Password', { exact: true }).fill(password);
-    await firstTab.getByRole('button', { name: 'Save my card', exact: true }).click();
-    const accountA = await firstTab.getByLabel('Account ID', { exact: true }).inputValue();
-    const keyA = await firstTab.getByLabel('Recovery key', { exact: true }).inputValue();
-
-    // A separate tab has separate sessionStorage and shares the ordinary customer cookie.
-    const secondTab = await customer.newPage();
-    await secondTab.goto('/join/morrow');
-    await fillShopContacts(secondTab);
-    await secondTab.getByLabel('Password', { exact: true }).fill(password);
-    await secondTab.getByRole('button', { name: 'Save my card', exact: true }).click();
-    const accountB = await secondTab.getByLabel('Account ID', { exact: true }).inputValue();
-    const keyB = await secondTab.getByLabel('Recovery key', { exact: true }).inputValue();
-    expect(accountB !== accountA).toBe(true);
-    await secondTab.getByLabel('I have saved my account ID and recovery key').check();
-    await secondTab.getByRole('button', { name: 'Save my card', exact: true }).click();
-    await expect(secondTab.getByTestId('stamp-progress')).toBeVisible();
-
-    await firstTab.reload();
-    await expect(
-      firstTab.getByRole('heading', { name: 'Your recovery key was shown once.' }),
-    ).toBeVisible();
-    await expect(firstTab.getByLabel('Account ID', { exact: true })).toHaveValue(accountA);
-    await firstTab.getByLabel('Password', { exact: true }).fill(password);
-    const rotationRequest = firstTab.waitForRequest(
-      (request) =>
-        request.url().endsWith('/api/auth/customer/rotate-recovery-key') &&
-        request.method() === 'POST',
-    );
-    await firstTab
-      .getByRole('button', { name: 'Make a replacement recovery key', exact: true })
-      .click();
-    const rotation = await rotationRequest;
-    expect(rotation.postDataJSON().accountId).toBe(accountA);
-    expect((await rotation.response())?.status()).toBe(401);
-    await expect(
-      firstTab.getByRole('alert').filter({ hasText: 'Sign in with the account ID shown here' }),
-    ).toBeVisible();
-    await expect(firstTab.getByLabel('Account ID', { exact: true })).toHaveValue(accountA);
-    await expect(firstTab.getByLabel('Recovery key', { exact: true })).toHaveCount(0);
-    expect(await firstTab.evaluate(() => sessionStorage.getItem('nqta.customer-key-save'))).toBe(
-      accountA,
-    );
-
-    // Both saved keys must still work: the failed replacement changed neither account.
-    const recoveredB = await recovery.request.post('/api/auth/customer/recover', {
-      headers: { origin },
-      data: { accountId: accountB, recoveryKey: keyB, password: 'RecoveredTabBPassword123!' },
+for (const interruption of ['retry', 'reload'] as const) {
+  test(`signup survives an enrolment failure and ${interruption} without creating another account or card`, async ({
+    page,
+    browser,
+  }) => {
+    const loginPhone = phone();
+    const displayName = `Retry Customer ${randomUUID().slice(0, 8)}`;
+    let registrations = 0;
+    let enrollments = 0;
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/auth/customer/register') && request.method() === 'POST')
+        registrations++;
     });
-    expect(recoveredB.ok()).toBe(true);
-    const recoveredA = await recovery.request.post('/api/auth/customer/recover', {
-      headers: { origin },
-      data: { accountId: accountA, recoveryKey: keyA, password: 'RecoveredTabAPassword123!' },
+    await page.route('**/api/join', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      enrollments++;
+      if (enrollments === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The shop is temporarily unavailable. Please try again.' }),
+        });
+      } else {
+        await route.continue();
+      }
     });
-    expect(recoveredA.ok()).toBe(true);
 
-    await firstTab.getByRole('button', { name: 'Sign in to my account', exact: true }).click();
-    await firstTab.getByLabel('Password', { exact: true }).fill('RecoveredTabAPassword123!');
-    const signedInRotation = firstTab.waitForRequest(
-      (request) =>
-        request.url().endsWith('/api/auth/customer/rotate-recovery-key') &&
-        request.method() === 'POST',
-    );
-    await firstTab.getByRole('button', { name: 'Sign in and open my card', exact: true }).click();
-    expect((await signedInRotation).postDataJSON().accountId).toBe(accountA);
+    await page.goto('/join/morrow');
+    await page.getByLabel('Phone number', { exact: true }).fill(loginPhone);
+    await page.getByLabel('Password', { exact: true }).fill(password);
+    await page.getByText('Your details (optional)', { exact: true }).click();
+    await page.getByLabel('First name').fill(displayName);
+    await page.getByRole('button', { name: 'Save my card', exact: true }).click();
     await expect(
-      firstTab.getByRole('button', { name: 'Save my card', exact: true }),
-    ).toBeDisabled();
-    await expect(firstTab.getByLabel('Recovery key', { exact: true })).toBeVisible();
-  } finally {
-    await Promise.all([customer.close(), recovery.close()]);
-  }
-});
+      page.getByRole('alert').filter({ hasText: 'temporarily unavailable' }),
+    ).toBeVisible();
+    expect(registrations).toBe(1);
+    expect(enrollments).toBe(1);
+    await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+    expect(await (await page.request.get('/api/auth/customer/account')).json()).toEqual({
+      loginPhone: international(loginPhone),
+    });
+    expect(await (await page.request.get('/api/customer/shop/morrow')).json()).toEqual({
+      membershipId: null,
+      loginPhone: international(loginPhone),
+    });
+
+    if (interruption === 'reload') {
+      await page.reload();
+      await expect(page.getByRole('button', { name: 'Save my card', exact: true })).toBeVisible();
+      await expect(page.getByLabel('Phone number', { exact: true })).toHaveValue(
+        international(loginPhone),
+      );
+      await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+      await page.getByText('Your details (optional)', { exact: true }).click();
+      await page.getByLabel('First name').fill(displayName);
+    }
+    await page.getByRole('button', { name: 'Save my card', exact: true }).click();
+    await expect(page).toHaveURL(/\/card\/[^/?]+/);
+    const membershipId = new URL(page.url()).pathname.split('/').pop()!;
+    await expect(page.getByRole('region', { name: 'Your checkout QR' })).toBeVisible();
+    expect(registrations).toBe(1);
+    expect(enrollments).toBe(2);
+    const cardResponse = await page.request.get(`/api/card/${membershipId}`);
+    expect(cardResponse.ok()).toBe(true);
+    const card = await cardResponse.json();
+    expect(card.name).toBe(displayName);
+    expect(card.totalStamps).toBe(0);
+    expect(await (await page.request.get('/api/customer/shop/morrow')).json()).toEqual({
+      membershipId,
+      loginPhone: international(loginPhone),
+    });
+    await expect(page.getByLabel('Recovery key', { exact: true })).toHaveCount(0);
+    await expect(page.getByLabel('I have saved my account ID and recovery key')).toHaveCount(0);
+    const stored = await page.evaluate(() =>
+      JSON.stringify({ ...localStorage, ...sessionStorage }),
+    );
+    expect(stored.includes(password)).toBe(false);
+    expect(stored.includes(loginPhone)).toBe(false);
+
+    const merchant = await browser.newContext({ reducedMotion: 'reduce' });
+    try {
+      const merchantPage = await merchant.newPage();
+      await merchantSignIn(merchantPage);
+      const members = await merchant.request.get(
+        `/api/customers?query=${encodeURIComponent(displayName)}`,
+      );
+      expect(members.ok()).toBe(true);
+      const matches = await members.json();
+      expect(matches).toHaveLength(1);
+      expect(matches[0].id).toBe(membershipId);
+    } finally {
+      await merchant.close();
+    }
+
+    await page.goto('/join/morrow');
+    await expect(page).toHaveURL(new RegExp(`/card/${membershipId}(?:\\?|$)`));
+    expect(registrations).toBe(1);
+    expect(enrollments).toBe(2);
+  });
+}

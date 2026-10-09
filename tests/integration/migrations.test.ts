@@ -37,7 +37,7 @@ describe('versioned database migrations', () => {
     const before = await db.query(
       'SELECT version,name,checksum,applied_at FROM nqta_schema_migrations ORDER BY version',
     );
-    expect(before.rows).toHaveLength(5);
+    expect(before.rows).toHaveLength(6);
     await migrate(db);
     expect(
       (
@@ -305,7 +305,14 @@ describe('versioned database migrations', () => {
     expect(await hasTable('nqta_schema_migrations')).toBe(true);
     expect(
       (await db.query('SELECT version FROM nqta_schema_migrations ORDER BY version')).rows,
-    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }, { version: 4 }, { version: 5 }]);
+    ).toEqual([
+      { version: 1 },
+      { version: 2 },
+      { version: 3 },
+      { version: 4 },
+      { version: 5 },
+      { version: 6 },
+    ]);
   });
 
   it('takes the PostgreSQL transaction lock before any migration DDL', async () => {

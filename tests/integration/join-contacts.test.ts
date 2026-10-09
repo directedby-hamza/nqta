@@ -103,7 +103,7 @@ it.each([
   { phone: '0600000101', email: 'mina@example.org' },
   { phone: '+212600000101', email: 'invalid-email' },
   { phone: '+212600000101', email: 'mina@example.org\nBcc: other@example.org' },
-  { phone: '+212600000101' },
+  { phone: '+212600000101', email: '' },
   { email: 'mina@example.org' },
   { phone: '+212600000101', email: `${'a'.repeat(200)}@example.org` },
 ])('rejects malformed contact input before creating a membership: %j', async (contacts) => {

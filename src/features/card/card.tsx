@@ -5,15 +5,16 @@ import { Coffee, Check, Gift, Settings, Sparkles, Leaf, ArrowRight } from 'lucid
 import { motion, useReducedMotion } from 'motion/react';
 import type { MembershipCard } from '@/lib/types';
 import { api, ApiError, message } from '@/lib/api';
+import { useResource } from '@/lib/use-resource';
 import { ErrorNotice, Loading, Modal, QR, Reveal, Toast } from '@/components/ui/primitives';
 import { Logo } from '@/components/layout/merchant-shell';
-import { useResource } from '@/lib/use-resource';
-export function CustomerCard({ id }: { id: string }) {
-  const config = useResource<{
-    authMode: 'verified-contact' | 'recovery-key';
-  }>('public/config');
-  const keyMode = config.data?.authMode === 'recovery-key';
+import { SaveCard } from '@/features/card/save-card';
+import { PhoneSignIn } from '@/features/card/phone-sign-in';
+export function CustomerCard({ id, shopSlug }: { id: string; shopSlug?: string }) {
+  const config = useResource<{ authMode: 'verified-contact' | 'recovery-key' }>('public/config');
+  const passwordAccount = config.data?.authMode === 'recovery-key';
   const [card, setCard] = useState<MembershipCard | null>(null);
+  const [rememberedShop, setRememberedShop] = useState(shopSlug);
   const [error, setError] = useState('');
   const [recover, setRecover] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -34,8 +35,20 @@ export function CustomerCard({ id }: { id: string }) {
     try {
       const value = await api<MembershipCard>(`card/${id}`);
       setCard(value);
+      setRememberedShop(value.shopSlug);
       setError('');
       setRecover(false);
+      // Retain public shop context for a shortcut saved from an older bare card URL.
+      if (value.shopSlug && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value.shopSlug)) {
+        const link = new URL(window.location.href);
+        if (
+          link.pathname === `/card/${encodeURIComponent(id)}` &&
+          link.searchParams.get('shop') !== value.shopSlug
+        ) {
+          link.searchParams.set('shop', value.shopSlug);
+          window.history.replaceState(window.history.state, '', link);
+        }
+      }
     } catch (e) {
       setError(message(e));
       const signedOut = e instanceof ApiError && e.status === 401;
@@ -102,6 +115,12 @@ export function CustomerCard({ id }: { id: string }) {
   const seconds = challenge
     ? Math.max(0, Math.ceil((new Date(challenge.expiresAt).getTime() - now) / 1000))
     : 0;
+  const active = card?.status === 'active' && (card.shopStatus || 'active') === 'active';
+  const currentShop = card?.shopSlug || rememberedShop || shopSlug;
+  const signInHref =
+    currentShop && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(currentShop)
+      ? `/join/${encodeURIComponent(currentShop)}${passwordAccount ? '?auth=sign-in' : ''}`
+      : '/recover';
   return (
     <main className="customer-page card-page">
       <div className="customer-top">
@@ -126,16 +145,14 @@ export function CustomerCard({ id }: { id: string }) {
       {recover && (
         <div className="join-form panel">
           <div className="panel-body">
-            <h2>Your progress is still here.</h2>
+            <h2>Your card is still here.</h2>
             <p className="subtle">
-              {keyMode
-                ? 'Sign in with your account ID and password, or use your saved recovery key.'
-                : config.data
-                  ? 'Verify the same phone to recover your card.'
-                  : 'Sign in through your shop to recover your card.'}
+              {passwordAccount
+                ? 'Sign in with your phone number and password to open your checkout QR.'
+                : 'Sign in through your shop to open your saved checkout QR.'}
             </p>
-            <Link className="button primary wide" href="/recover">
-              Recover my card <ArrowRight size={15} />
+            <Link className="button primary wide" href={signInHref}>
+              Sign in to my card <ArrowRight size={15} />
             </Link>
           </div>
         </div>
@@ -146,13 +163,45 @@ export function CustomerCard({ id }: { id: string }) {
         card && (
           <Reveal className="card-content">
             <div className="card-welcome">
-              <span className="eyebrow">A familiar face</span>
+              <span className="eyebrow">{card.shopName}</span>
               <h1>
-                Hey, {card.name?.split(' ')[0] || 'there'}
+                {card.name && card.name !== 'A new regular'
+                  ? `Hey, ${card.name.split(' ')[0]}`
+                  : 'Welcome back'}
                 <span className="accent-period">.</span>
               </h1>
-              <p>Good to see you back.</p>
+              <p>Your card, ready for your next visit.</p>
             </div>
+            <section
+              className="member-qr-panel panel checkout-qr-panel"
+              aria-label="Your checkout QR"
+            >
+              <div className="checkout-qr-heading">
+                <span className="eyebrow">Ready at checkout</span>
+                <h2>Show your QR. Collect your stamp.</h2>
+                <p>The team scans this code after your qualifying purchase.</p>
+              </div>
+              {active ? (
+                <>
+                  <div className="checkout-qr-image">
+                    <QR value={card.memberCode} size={240} />
+                  </div>
+                  <code>{card.memberCode}</code>
+                  <SaveCard
+                    memberCode={card.memberCode}
+                    shopName={card.shopName}
+                    membershipId={card.id}
+                    shopSlug={card.shopSlug}
+                    passwordAccount={passwordAccount}
+                    active={active}
+                  />
+                </>
+              ) : (
+                <p className="notice warm">
+                  This card is inactive. Please ask the shop team for help.
+                </p>
+              )}
+            </section>
             <div className="loyalty-card" style={{ background: card.theme }}>
               <div className="between">
                 <div>
@@ -215,15 +264,6 @@ export function CustomerCard({ id }: { id: string }) {
                 <strong>{card.rewardDescription}</strong>
               </p>
             </div>
-            <div className="member-qr-panel panel">
-              <div>
-                <span className="eyebrow">Your little passport</span>
-                <h2>Show. Stamp. Repeat.</h2>
-                <p>Let the team scan this at checkout.</p>
-                <code>{card.memberCode}</code>
-              </div>
-              <QR value={card.memberCode} size={116} />
-            </div>
             <div className="card-rewards">
               <div className="between">
                 <h2>Your little rewards</h2>
@@ -281,11 +321,10 @@ export function CustomerCard({ id }: { id: string }) {
               <p>
                 Earned rewards do not expire automatically. A reward-only receipt does not earn a
                 stamp.{' '}
-                {keyMode
-                  ? 'Lost your card? Use your account ID and password on the shop enrolment page, or use your saved recovery key.'
-                  : card.phone
-                    ? 'Lost your card? Verify the same phone on the shop enrolment page.'
-                    : 'Lost your card? Sign in through your shop to recover your card.'}
+                {passwordAccount
+                  ? 'Use your phone number and password to open your card on another device.'
+                  : 'Verify the same phone through your shop to open your card on another device.'}{' '}
+                If you cannot sign in, ask the shop team for help.
               </p>
             </details>
             <div className="card-saved">
@@ -339,6 +378,7 @@ export function CustomerCard({ id }: { id: string }) {
         description={`Manage your card with ${card?.shopName || 'this shop'}.`}
       >
         <div className="stack">
+          {passwordAccount && <PhoneSignIn />}
           {card?.phone ? (
             <>
               <label className="checkbox">
@@ -363,8 +403,8 @@ export function CustomerCard({ id }: { id: string }) {
             </>
           ) : (
             <p className="subtle">
-              Your membership and rewards are saved to your account. Keep your account ID and
-              recovery key private; ask the shop team if you need assistance.
+              Your membership and rewards are saved to your account. Keep your password private; ask
+              the shop team if you need assistance.
             </p>
           )}
           <ErrorNotice error={modalError} />

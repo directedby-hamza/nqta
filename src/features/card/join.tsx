@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Coffee, ArrowRight, ShieldCheck, Leaf, MapPin } from 'lucide-react';
-import { api, message } from '@/lib/api';
+import { api, ApiError, message } from '@/lib/api';
+import { normaliseCustomerLoginPhone } from '@/lib/customer-phone';
 import { useResource } from '@/lib/use-resource';
 import type { Shop, Programme } from '@/lib/types';
 import { ErrorNotice, Loading, Reveal } from '@/components/ui/primitives';
@@ -40,19 +41,73 @@ export function Join({
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
   const [savedMembershipId, setSavedMembershipId] = useState('');
-  const savedCardHref = savedMembershipId
-    ? `/card/${savedMembershipId}?shop=${encodeURIComponent(slug)}`
-    : undefined;
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [accessError, setAccessError] = useState('');
+  const [probeVersion, setProbeVersion] = useState(0);
+  function cardHref(id: string) {
+    return `/card/${id}?shop=${encodeURIComponent(slug)}`;
+  }
+  useEffect(() => {
+    if (config.loading || !config.data) return;
+    if (!keyMode) {
+      setCheckingSession(false);
+      return;
+    }
+    let active = true;
+    setCheckingSession(true);
+    setAccessError('');
+    api<{ membershipId: string | null; loginPhone: string | null }>(
+      `customer/shop/${encodeURIComponent(slug)}`,
+    )
+      .then((found) => {
+        if (!active) return;
+        setAuthenticated(true);
+        if (found.membershipId) {
+          router.replace(`/card/${found.membershipId}?shop=${encodeURIComponent(slug)}`);
+          return;
+        }
+        if (found.loginPhone) setPhone(found.loginPhone);
+        setCheckingSession(false);
+      })
+      .catch((cause) => {
+        if (!active) return;
+        if (cause instanceof ApiError && cause.status === 401) setAuthenticated(false);
+        else setAccessError(message(cause));
+        setCheckingSession(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [slug, keyMode, config.loading, config.data, probeVersion, router]);
+
   async function openCard(saveContacts?: boolean) {
     let membershipId = savedMembershipId;
     if (!membershipId) {
+      const found = await api<{ membershipId: string | null; loginPhone: string | null }>(
+        `customer/shop/${encodeURIComponent(slug)}`,
+      );
+      setAuthenticated(true);
+      membershipId = found.membershipId || '';
+      if (found.loginPhone && !phone) setPhone(found.loginPhone);
+      // Sign-in and recognition do not create a membership at an unjoined shop.
+      if (!membershipId && !saveContacts) return;
+    }
+    if (!membershipId) {
+      if (!data?.programme || data.shop.status !== 'active')
+        throw new Error('This shop is not accepting new cards right now.');
       const member = await api<{ id: string }>('join', {
         method: 'POST',
         body: {
           programmeId: data?.programme?.id,
           name,
-          ...(saveContacts && phone && email
-            ? { contacts: { phone: phone.trim(), email: email.trim() } }
+          ...(saveContacts && phone
+            ? {
+                contacts: {
+                  phone: normaliseCustomerLoginPhone(phone),
+                  ...(email.trim() ? { email: email.trim() } : {}),
+                },
+              }
             : {}),
           consents: { sms: false, whatsapp: false },
         },
@@ -60,7 +115,7 @@ export function Join({
       membershipId = member.id;
       setSavedMembershipId(membershipId);
     }
-    router.push(`/card/${membershipId}?shop=${encodeURIComponent(slug)}`);
+    router.push(cardHref(membershipId));
   }
   async function request(e: FormEvent) {
     e.preventDefault();
@@ -103,15 +158,23 @@ export function Join({
       {data?.hostedTest && (
         <div className="notice warm">
           {keyMode
-            ? 'Hosted testing · use sample account details. Save your recovery key; no messages are sent.'
+            ? 'Hosted testing · use sample account details. No messages are sent.'
             : 'Hosted testing · use sample names and phone numbers. Verification is simulated; no SMS is sent.'}
         </div>
       )}
-      {loading || config.loading ? (
+      {loading || config.loading || (keyMode && checkingSession) ? (
         <Loading />
-      ) : error || config.error ? (
+      ) : error || config.error || accessError ? (
         <div className="join-form panel">
-          <ErrorNotice error={error || config.error} />
+          <ErrorNotice error={error || config.error || accessError} />
+          {accessError && (
+            <button
+              className="button primary"
+              onClick={() => setProbeVersion((value) => value + 1)}
+            >
+              Try again
+            </button>
+          )}
           <Link href="/recover" className="button quiet">
             Find your shop
           </Link>
@@ -156,20 +219,20 @@ export function Join({
                   earned rewards used.
                 </div>
               )}
-              {!data.programme ? (
-                <div className="notice warm">
-                  This shop is not accepting enrolments right now. Please check with the team.
-                </div>
-              ) : keyMode ? (
+              {keyMode ? (
                 <PasswordAccount
                   initialMode={initialAccountMode}
                   name={name}
                   onNameChange={setName}
                   onAuthenticated={openCard}
                   contacts={{ phone, email, onPhoneChange: setPhone, onEmailChange: setEmail }}
-                  enrollmentShop={slug}
-                  savedCardHref={savedCardHref}
+                  authenticated={authenticated}
+                  enrolmentAvailable={Boolean(data.programme) && data.shop.status === 'active'}
                 />
+              ) : !data.programme ? (
+                <div className="notice warm">
+                  This shop is not accepting enrolments right now. Please check with the team.
+                </div>
               ) : !challenge ? (
                 <form onSubmit={request}>
                   <div className="field">
@@ -302,7 +365,7 @@ export function Join({
                   )}
                   <p>
                     {keyMode
-                      ? 'We keep your account identifier, optional name, declared phone and email, and loyalty activity to run this shop’s programme. Your contact details are not verified, and do not authorize promotional messages. You can request deletion from your card settings.'
+                      ? 'We keep your sign-in number, optional name and email, and loyalty activity to run this shop’s programme. Phone and email are not verified, and do not authorize promotional messages. Your password protects account access. You can request deletion from your card settings.'
                       : 'We keep your verified phone, optional name, and loyalty activity to run this shop’s programme. Promotional choices are separate. You can withdraw them or request deletion from your card settings.'}{' '}
                     A shop owner reviews deletion requests and any records that need retention.
                   </p>

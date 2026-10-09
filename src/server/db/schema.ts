@@ -38,8 +38,9 @@ export const customerCredentials = pgTable('customer_credentials', {
     .primaryKey()
     .references(() => customers.id),
   accountId: text('account_id').notNull().unique(),
+  loginPhone: text('login_phone').unique(),
   passwordHash: text('password_hash').notNull(),
-  recoveryKeyHash: text('recovery_key_hash').notNull().unique(),
+  recoveryKeyHash: text('recovery_key_hash').unique(),
 });
 export const staff = pgTable('staff', {
   id: text('id').primaryKey(),

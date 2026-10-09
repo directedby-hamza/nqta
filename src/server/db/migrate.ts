@@ -141,6 +141,17 @@ export const migrations: readonly Migration[] = [
       `ALTER TABLE memberships ADD COLUMN IF NOT EXISTS contact_email text`,
     ],
   },
+  {
+    version: 6,
+    name: 'customer_phone_password_accounts',
+    statements: [
+      `ALTER TABLE customer_credentials ADD COLUMN IF NOT EXISTS login_phone text`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS customer_credentials_login_phone ON customer_credentials(login_phone)`,
+      `ALTER TABLE customer_credentials ALTER COLUMN recovery_key_hash DROP NOT NULL`,
+      `ALTER TABLE customer_credentials ADD CONSTRAINT customer_credentials_login_phone_format
+ CHECK(login_phone IS NULL OR login_phone ~ '^[+][1-9][0-9]{7,14}$')`,
+    ],
+  },
 ];
 
 function checksum(migration: Migration) {

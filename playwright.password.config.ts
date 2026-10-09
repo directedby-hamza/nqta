@@ -7,7 +7,13 @@ const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: ['password-accounts.spec.ts', 'staff-key-ui.spec.ts'],
+  testMatch: [
+    'password-accounts.spec.ts',
+    'simple-customer-access.spec.ts',
+    'card-access-regressions.spec.ts',
+    'staff-key-ui.spec.ts',
+    'wallet-cards.spec.ts',
+  ],
   workers: 1,
   timeout: 90000,
   expect: { timeout: 15000 },
