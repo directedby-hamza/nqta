@@ -17,12 +17,10 @@ function phone() {
 
 async function createCard(page: Page, loginPhone: string, name?: string) {
   await page.goto('/join/morrow');
+  await page.getByLabel('Full name', { exact: true }).fill(name || 'Simple Mobile Customer');
   await page.getByLabel('Phone number', { exact: true }).fill(loginPhone);
+  await page.getByLabel('Email address', { exact: true }).fill('simple.mobile@example.com');
   await page.getByLabel('Password', { exact: true }).fill(password);
-  if (name) {
-    await page.getByText('Your details (optional)', { exact: true }).click();
-    await page.getByLabel('First name').fill(name);
-  }
   await page.getByRole('button', { name: 'Save my card', exact: true }).click();
   await expect(page).toHaveURL(/\/card\/[^/?]+/);
   await expect(page.getByRole('region', { name: 'Your checkout QR' })).toBeVisible();
@@ -227,7 +225,7 @@ test('a downloaded PNG scans for checkout without customer login and a new brows
   }
 });
 
-test('invalid phone details are corrected before signup while name and email remain optional', async ({
+test('invalid phone details are corrected before signup with a complete customer profile', async ({
   page,
 }) => {
   let registrations = 0;
@@ -235,7 +233,9 @@ test('invalid phone details are corrected before signup while name and email rem
     if (request.url().endsWith('/api/auth/customer/register')) registrations++;
   });
   await page.goto('/join/morrow');
+  await page.getByLabel('Full name', { exact: true }).fill('Phone Correction Customer');
   await page.getByLabel('Phone number', { exact: true }).fill('1234');
+  await page.getByLabel('Email address', { exact: true }).fill('phone.correction@example.com');
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Save my card', exact: true }).click();
   await expect(page.getByRole('alert').filter({ hasText: /valid phone number/i })).toBeVisible();

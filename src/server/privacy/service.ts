@@ -35,8 +35,12 @@ export function createPrivacyService(db: Database) {
         if (!request) throw new Error('Request not found or access denied.');
         if (request.status === 'resolved') return;
         const existing = (
-          await tx.query<{ customer_id: string; phone: string | null }>(
-            'SELECT m.customer_id,c.phone FROM memberships m JOIN customers c ON c.id=m.customer_id WHERE m.id=$1 AND m.shop_id=$2',
+          await tx.query<{
+            customer_id: string;
+            phone: string | null;
+            contact_email: string | null;
+          }>(
+            'SELECT m.customer_id,c.phone,m.contact_email FROM memberships m JOIN customers c ON c.id=m.customer_id WHERE m.id=$1 AND m.shop_id=$2',
             [request.membership_id, actor.shopId],
           )
         ).rows[0];
@@ -51,6 +55,19 @@ export function createPrivacyService(db: Database) {
         await tx.query('SELECT id FROM memberships WHERE id=$1 FOR UPDATE', [
           request.membership_id,
         ]);
+        // Preserve the shop-level withdrawal if another active card shares this address.
+        // The deleted card's raw email is cleared below; no suppression contact is retained.
+        if (existing.contact_email) {
+          const matches = await tx.query<{ id: string }>(
+            "SELECT id FROM memberships WHERE shop_id=$1 AND status='active' AND id<>$2 AND LOWER(TRIM(contact_email))=LOWER(TRIM($3::text)) ORDER BY id",
+            [actor.shopId, request.membership_id, existing.contact_email],
+          );
+          for (const match of matches.rows)
+            await tx.query(
+              "INSERT INTO consents(id,membership_id,channel,opted_in,wording_version) VALUES($1,$2,'email',false,'email-newsletter-deletion-1.0')",
+              [id(), match.id],
+            );
+        }
         const removedId = id();
         await tx.query("INSERT INTO customers(id,phone,name) VALUES($1,$2,'Removed member')", [
           removedId,
@@ -73,6 +90,10 @@ export function createPrivacyService(db: Database) {
             'INSERT INTO consents(id,membership_id,channel,opted_in) VALUES($1,$2,$3,false)',
             [id(), request.membership_id, channel],
           );
+        await tx.query(
+          "INSERT INTO consents(id,membership_id,channel,opted_in,wording_version) VALUES($1,$2,'email',false,'email-newsletter-1.0')",
+          [id(), request.membership_id],
+        );
         await tx.query('UPDATE audit SET actor_id=$1 WHERE shop_id=$2 AND actor_id=$3', [
           removedId,
           actor.shopId,

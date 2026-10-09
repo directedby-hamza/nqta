@@ -36,6 +36,10 @@ export type Member = {
   id: string;
   name: string;
   phone: string;
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  newsletterOptedIn?: boolean;
+  newsletterUpdatedAt?: string | null;
   memberCode: string;
   totalStamps: number;
   progress: number;

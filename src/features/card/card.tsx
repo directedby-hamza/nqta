@@ -20,6 +20,7 @@ export function CustomerCard({ id, shopSlug }: { id: string; shopSlug?: string }
   const [settings, setSettings] = useState(false);
   const [sms, setSms] = useState(false);
   const [whatsapp, setWhatsapp] = useState(false);
+  const [newsletter, setNewsletter] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
   const [modalError, setModalError] = useState('');
@@ -87,7 +88,14 @@ export function CustomerCard({ id, shopSlug }: { id: string; shopSlug?: string }
     try {
       await api('preferences', {
         method: 'PATCH',
-        body: { membershipId: id, consents: { sms, whatsapp } },
+        body: {
+          membershipId: id,
+          consents: {
+            sms: card?.phone ? sms : card?.consents?.sms || false,
+            whatsapp: card?.phone ? whatsapp : card?.consents?.whatsapp || false,
+            ...(card?.newsletter?.email ? { email: newsletter } : {}),
+          },
+        },
       });
       setSettings(false);
       setToast('Your choices are saved');
@@ -132,6 +140,7 @@ export function CustomerCard({ id, shopSlug }: { id: string; shopSlug?: string }
             onClick={() => {
               setSms(card.consents?.sms || false);
               setWhatsapp(card.consents?.whatsapp || false);
+              setNewsletter(card.newsletter?.optedIn || false);
               setModalError('');
               setDeleting(false);
               setSettings(true);
@@ -379,22 +388,42 @@ export function CustomerCard({ id, shopSlug }: { id: string; shopSlug?: string }
       >
         <div className="stack">
           {passwordAccount && <PhoneSignIn />}
-          {card?.phone ? (
+          {card?.phone || card?.newsletter?.email ? (
             <>
-              <label className="checkbox">
-                <input type="checkbox" checked={sms} onChange={(e) => setSms(e.target.checked)} />
-                Promotional SMS from this shop
-              </label>
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={whatsapp}
-                  onChange={(e) => setWhatsapp(e.target.checked)}
-                />
-                Promotional WhatsApp from this shop
-              </label>
+              {card.phone && (
+                <>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={sms}
+                      onChange={(e) => setSms(e.target.checked)}
+                    />
+                    Promotional SMS from this shop
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={whatsapp}
+                      onChange={(e) => setWhatsapp(e.target.checked)}
+                    />
+                    Promotional WhatsApp from this shop
+                  </label>
+                </>
+              )}
+              {card.newsletter?.email && (
+                <label className="checkbox">
+                  <input
+                    id="card-newsletter"
+                    type="checkbox"
+                    checked={newsletter}
+                    onChange={(e) => setNewsletter(e.target.checked)}
+                  />
+                  Email news and offers from {card.shopName}
+                </label>
+              )}
               <p className="subtle">
-                Optional. Your membership and rewards work without either choice.
+                Optional. Your membership and rewards work without subscribing. These choices apply
+                only to {card.shopName}.
               </p>
               <button className="button primary wide" disabled={busy} onClick={() => void save()}>
                 Save my choices

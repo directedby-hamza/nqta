@@ -28,6 +28,7 @@ export type MembershipCard = {
   needsReview: boolean;
   status: string;
   consents?: { sms: boolean; whatsapp: boolean };
+  newsletter?: { email: string | null; optedIn: boolean; updatedAt: string | null };
 };
 export type PurchaseInput = {
   membershipId: string;

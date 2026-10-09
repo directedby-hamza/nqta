@@ -13,6 +13,7 @@ export default defineConfig({
     'card-access-regressions.spec.ts',
     'staff-key-ui.spec.ts',
     'wallet-cards.spec.ts',
+    'signup-profile.spec.ts',
   ],
   workers: 1,
   timeout: 90000,

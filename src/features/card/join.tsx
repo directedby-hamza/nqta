@@ -31,6 +31,7 @@ export function Join({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [newsletter, setNewsletter] = useState(false);
   const [sms, setSms] = useState(false);
   const [whatsapp, setWhatsapp] = useState(false);
   const [challenge, setChallenge] = useState<{
@@ -48,6 +49,10 @@ export function Join({
   function cardHref(id: string) {
     return `/card/${id}?shop=${encodeURIComponent(slug)}`;
   }
+  useEffect(() => {
+    // A choice for another shop must never preselect this shop’s newsletter.
+    setNewsletter(false);
+  }, [slug]);
   useEffect(() => {
     if (config.loading || !config.data) return;
     if (!keyMode) {
@@ -100,16 +105,12 @@ export function Join({
         method: 'POST',
         body: {
           programmeId: data?.programme?.id,
-          name,
-          ...(saveContacts && phone
-            ? {
-                contacts: {
-                  phone: normaliseCustomerLoginPhone(phone),
-                  ...(email.trim() ? { email: email.trim() } : {}),
-                },
-              }
-            : {}),
-          consents: { sms: false, whatsapp: false },
+          profile: {
+            fullName: name.trim(),
+            phone: normaliseCustomerLoginPhone(phone),
+            email: email.trim(),
+          },
+          consents: { sms: false, whatsapp: false, email: newsletter },
         },
       });
       membershipId = member.id;
@@ -226,6 +227,9 @@ export function Join({
                   onNameChange={setName}
                   onAuthenticated={openCard}
                   contacts={{ phone, email, onPhoneChange: setPhone, onEmailChange: setEmail }}
+                  shopName={data.shop.name}
+                  newsletter={newsletter}
+                  onNewsletterChange={setNewsletter}
                   authenticated={authenticated}
                   enrolmentAvailable={Boolean(data.programme) && data.shop.status === 'active'}
                 />
@@ -365,7 +369,7 @@ export function Join({
                   )}
                   <p>
                     {keyMode
-                      ? 'We keep your sign-in number, optional name and email, and loyalty activity to run this shop’s programme. Phone and email are not verified, and do not authorize promotional messages. Your password protects account access. You can request deletion from your card settings.'
+                      ? 'We keep your full name, phone number, email, and loyalty activity to run this shop’s programme. Your contact details are shared only with shops you join. Phone and email are not verified. Email news and offers are a separate, optional choice for this shop, which you can change in card settings. Your password protects account access. You can request deletion from your card settings.'
                       : 'We keep your verified phone, optional name, and loyalty activity to run this shop’s programme. Promotional choices are separate. You can withdraw them or request deletion from your card settings.'}{' '}
                     A shop owner reviews deletion requests and any records that need retention.
                   </p>

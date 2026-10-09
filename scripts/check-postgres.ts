@@ -329,12 +329,18 @@ export async function exerciseDatabaseConcurrency(
       rejectDatabaseErrors(access);
       check(access[0].status === 'rejected', 'deleted-identity-access');
       const latest = (
-        await first.query<{ opted_in: boolean }>(
-          'SELECT DISTINCT ON(channel) opted_in FROM consents WHERE membership_id=$1 ORDER BY channel,sequence DESC',
+        await first.query<{ channel: string; opted_in: boolean }>(
+          'SELECT DISTINCT ON(channel) channel,opted_in FROM consents WHERE membership_id=$1 ORDER BY channel,sequence DESC',
           [fixture.memberId],
         )
       ).rows;
-      check(latest.length === 2 && latest.every((row) => !row.opted_in), 'deleted-consents');
+      check(
+        latest.length === 3 &&
+          ['sms', 'whatsapp', 'email'].every((channel) =>
+            latest.some((row) => row.channel === channel && !row.opted_in),
+          ),
+        'deleted-consents',
+      );
     }
     const resolution = 'Synthetic disposable drill deletion completed.';
     onStage('deletion-reward-fixture');

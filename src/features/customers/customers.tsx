@@ -32,7 +32,9 @@ export function Customers() {
       ? member.availableRewards > 0
       : filter === 'regulars'
         ? member.visits >= 5
-        : true,
+        : filter === 'newsletter'
+          ? member.newsletterOptedIn === true
+          : true,
   );
   async function detail(id: string) {
     try {
@@ -53,10 +55,14 @@ export function Customers() {
           <p>A familiar face today. A regular tomorrow.</p>
         </div>
         {workspace.actor.role === 'owner' && (
-          <a href="/api/export?days=30" className="button secondary">
-            <Download size={15} />
-            Export activity
-          </a>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <a href="/api/export?days=30" className="button secondary">
+              <Download size={15} /> Export activity
+            </a>
+            <a href="/api/customers/newsletter-export" className="button secondary">
+              <Download size={15} /> Export newsletter list
+            </a>
+          </div>
         )}
       </div>
       <div className="customer-summary">
@@ -87,6 +93,9 @@ export function Customers() {
               { value: 'all', label: 'All members' },
               { value: 'regulars', label: 'Regulars' },
               { value: 'rewards', label: 'Reward ready' },
+              ...(workspace.actor.role === 'owner'
+                ? [{ value: 'newsletter', label: 'Newsletter opt-in' }]
+                : []),
             ].map((tab) => (
               <button
                 className={filter === tab.value ? 'selected' : ''}
@@ -125,6 +134,7 @@ export function Customers() {
               <thead>
                 <tr>
                   <th>Customer</th>
+                  {workspace.actor.role === 'owner' && <th>Contact & newsletter</th>}
                   <th>Card progress</th>
                   <th>Paid receipts</th>
                   <th>Rewards</th>
@@ -146,6 +156,26 @@ export function Customers() {
                         </span>
                       </button>
                     </td>
+                    {workspace.actor.role === 'owner' && (
+                      <td style={{ maxWidth: 260, overflowWrap: 'anywhere' }}>
+                        <span className="table-name">
+                          {member.contactEmail || 'No email saved'}
+                        </span>
+                        <span className="table-secondary">
+                          {member.contactPhone || member.phone || 'No phone shared'}
+                        </span>
+                        <span className={member.newsletterOptedIn ? 'badge' : 'table-secondary'}>
+                          {member.newsletterOptedIn
+                            ? 'Email offers: opted in'
+                            : 'Email offers: not opted in'}
+                        </span>
+                        {member.newsletterUpdatedAt && (
+                          <span className="table-secondary">
+                            Preference updated {dateLabel(member.newsletterUpdatedAt)}
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td>
                       <TinyStamps progress={member.progress} threshold={member.threshold} />
                     </td>
@@ -181,7 +211,11 @@ export function Customers() {
         <div className="table-footer">
           Showing {items.length} members
           {(members.data?.length || 0) >= 500 ? ' · first 500 results; narrow your search' : ''}
-          <span>Contact numbers are masked for privacy.</span>
+          <span>
+            {workspace.actor.role === 'owner'
+              ? 'Contacts are customer-provided. Newsletter export includes current opt-ins only.'
+              : 'Contact numbers are masked for privacy.'}
+          </span>
         </div>
       </div>
       <Modal

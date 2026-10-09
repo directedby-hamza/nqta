@@ -167,10 +167,10 @@ for (const interruption of ['retry', 'reload'] as const) {
     });
 
     await page.goto('/join/morrow');
+    await page.getByLabel('Full name', { exact: true }).fill(displayName);
     await page.getByLabel('Phone number', { exact: true }).fill(loginPhone);
+    await page.getByLabel('Email address', { exact: true }).fill('retry.customer@example.com');
     await page.getByLabel('Password', { exact: true }).fill(password);
-    await page.getByText('Your details (optional)', { exact: true }).click();
-    await page.getByLabel('First name').fill(displayName);
     await page.getByRole('button', { name: 'Save my card', exact: true }).click();
     await expect(
       page.getByRole('alert').filter({ hasText: 'temporarily unavailable' }),
@@ -193,8 +193,8 @@ for (const interruption of ['retry', 'reload'] as const) {
         international(loginPhone),
       );
       await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
-      await page.getByText('Your details (optional)', { exact: true }).click();
-      await page.getByLabel('First name').fill(displayName);
+      await page.getByLabel('Full name', { exact: true }).fill(displayName);
+      await page.getByLabel('Email address', { exact: true }).fill('retry.customer@example.com');
     }
     await page.getByRole('button', { name: 'Save my card', exact: true }).click();
     await expect(page).toHaveURL(/\/card\/[^/?]+/);

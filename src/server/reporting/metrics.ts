@@ -3,6 +3,7 @@ import type { Actor } from '../loyalty/types';
 import { assertActor } from '../auth/permissions';
 import { auditEvent } from '../audit';
 import { maskPhone } from '../loyalty/membership';
+import { z } from 'zod';
 export type Range = { from: string; to: string };
 export type DashboardData = {
   totalMembers: number;
@@ -137,12 +138,16 @@ export function createReportingService(db: Database) {
         .join('\r\n');
     },
     async listMemberships(actor: Actor, query = '') {
-      await assertActor(db, actor);
+      const current = await assertActor(db, actor);
       const search = query.slice(0, 100).replace(/[\\%_]/g, '\\$&');
       const { rows } = await db.query<{
         id: string;
         name: string;
         phone: string | null;
+        contact_phone: string | null;
+        contact_email: string | null;
+        newsletter_opted_in: boolean;
+        newsletter_updated_at: Date | null;
         member_code: string;
         created_at: Date;
         stamps: string;
@@ -151,19 +156,31 @@ export function createReportingService(db: Database) {
         visits: string;
         last_visit: Date | null;
       }>(
-        `SELECT m.id,c.name,c.phone,m.member_code,m.created_at,p.threshold,
+        `SELECT m.id,c.name,c.phone,m.contact_phone,m.contact_email,m.member_code,m.created_at,p.threshold,
+        COALESCE(ec.opted_in,false) AS newsletter_opted_in,ec.created_at AS newsletter_updated_at,
         COALESCE((SELECT SUM(delta) FROM ledger WHERE membership_id=m.id),0) AS stamps,
         (SELECT COUNT(*) FROM rewards WHERE membership_id=m.id AND state='available') AS available,
         (SELECT COUNT(*) FROM events WHERE membership_id=m.id AND kind='purchase' AND qualifies AND NOT reversed) AS visits,
         (SELECT MAX(created_at) FROM events WHERE membership_id=m.id AND NOT reversed AND kind IN ('purchase','redemption')) AS last_visit
         FROM memberships m JOIN customers c ON c.id=m.customer_id JOIN programmes p ON p.id=m.programme_id
+        LEFT JOIN LATERAL (SELECT opted_in,created_at FROM consents WHERE membership_id=m.id AND channel='email' ORDER BY sequence DESC LIMIT 1) ec ON true
         WHERE m.shop_id=$1 AND (c.name ILIKE '%'||$2||'%' OR m.member_code ILIKE '%'||$2||'%') ORDER BY last_visit DESC NULLS LAST,m.created_at DESC LIMIT 500`,
         [actor.shopId, search],
       );
       return rows.map((r) => ({
         id: r.id,
         name: r.name || 'A new regular',
-        phone: maskPhone(r.phone),
+        phone: maskPhone(r.contact_phone || r.phone),
+        ...(current.role === 'owner'
+          ? {
+              contactPhone: r.contact_phone,
+              contactEmail: r.contact_email,
+              newsletterOptedIn: r.newsletter_opted_in,
+              newsletterUpdatedAt: r.newsletter_updated_at
+                ? new Date(r.newsletter_updated_at).toISOString()
+                : null,
+            }
+          : {}),
         memberCode: r.member_code,
         totalStamps: Number(r.stamps),
         progress: Number(r.stamps) % r.threshold,
@@ -173,6 +190,55 @@ export function createReportingService(db: Database) {
         joinedAt: new Date(r.created_at).toISOString(),
         lastVisit: r.last_visit ? new Date(r.last_visit).toISOString() : null,
       }));
+    },
+    async exportNewsletter(actor: Actor): Promise<string> {
+      await assertActor(db, actor, true);
+      const { rows } = await db.query<{
+        name: string;
+        contact_phone: string | null;
+        contact_email: string;
+        opted_in: boolean;
+        consent_updated_at: Date;
+      }>(
+        `SELECT c.name,m.contact_phone,m.contact_email,ec.opted_in,ec.created_at AS consent_updated_at
+        FROM memberships m JOIN customers c ON c.id=m.customer_id
+        JOIN LATERAL (SELECT opted_in,created_at,sequence FROM consents WHERE membership_id=m.id AND channel='email' ORDER BY sequence DESC LIMIT 1) ec ON true
+        WHERE m.shop_id=$1 AND m.status='active' AND m.contact_email IS NOT NULL
+        ORDER BY ec.sequence DESC,m.id`,
+        [actor.shopId],
+      );
+      const seen = new Set<string>();
+      const recipients = rows.filter((row) => {
+        const email = row.contact_email.trim().toLowerCase();
+        if (!z.email().max(200).safeParse(email).success || seen.has(email)) return false;
+        seen.add(email);
+        row.contact_email = email;
+        return row.opted_in;
+      });
+      const cell = (value: unknown) => {
+        let text = value == null ? '' : String(value);
+        if (/^[\s]*[=+@-]/.test(text)) text = `'${text}`;
+        return `"${text.replace(/"/g, '""')}"`;
+      };
+      await auditEvent(
+        db,
+        actor.shopId,
+        actor.userId,
+        'newsletter.exported',
+        actor.shopId,
+        `${recipients.length} opted-in email addresses`,
+      );
+      return [
+        ['full_name', 'email', 'phone', 'consent_updated_at'],
+        ...recipients.map((row) => [
+          row.name,
+          row.contact_email,
+          row.contact_phone,
+          new Date(row.consent_updated_at).toISOString(),
+        ]),
+      ]
+        .map((row) => row.map(cell).join(','))
+        .join('\r\n');
     },
     async listActivity(actor: Actor, membershipId?: string) {
       await assertActor(db, actor);

@@ -22,6 +22,12 @@ export const joinContactsSchema = z.object({
   phone: z.string().max(100).transform(normalisePhone),
   email: z.string().trim().toLowerCase().max(200).pipe(z.email()).optional(),
 });
+export const joinProfileSchema = z.object({
+  fullName: z.string().trim().min(1, 'Enter your full name.').max(100),
+  phone: joinContactsSchema.shape.phone,
+  email: joinContactsSchema.shape.email.unwrap(),
+});
+const newsletterWordingVersion = 'email-newsletter-1.0';
 export type JoinContacts = z.input<typeof joinContactsSchema>;
 export function createCustomerService(db: Database, options = { development: false }) {
   return {
@@ -137,7 +143,7 @@ export function createCustomerService(db: Database, options = { development: fal
       customerId: string,
       programmeId: string,
       name: string,
-      consents: { sms: boolean; whatsapp: boolean },
+      consents: { sms: boolean; whatsapp: boolean; email?: boolean },
       contacts?: JoinContacts,
     ): Promise<{ id: string }> {
       if (name.length > 100) throw new Error('Use a shorter display name.');
@@ -163,6 +169,8 @@ export function createCustomerService(db: Database, options = { development: fal
           [customerId, programmeId],
         );
         if (previous.rows[0]) return previous.rows[0];
+        if (consents.email === true && !declaredContacts?.email)
+          throw new Error('Provide your email address before choosing email newsletters.');
         if (productionMode()) await assertMerchantPrivacy(tx, shopId);
         if (programme.rows[0].shop_status !== 'active')
           throw new Error(
@@ -189,18 +197,40 @@ export function createCustomerService(db: Database, options = { development: fal
             'INSERT INTO consents(id,membership_id,channel,opted_in) VALUES($1,$2,$3,$4)',
             [id(), membershipId, channel, consents[channel] === true],
           );
+        await tx.query(
+          "INSERT INTO consents(id,membership_id,channel,opted_in,wording_version) VALUES($1,$2,'email',$3,$4)",
+          [id(), membershipId, consents.email === true, newsletterWordingVersion],
+        );
         await auditEvent(tx, shopId, customerId, 'membership.joined', membershipId);
         return { id: membershipId };
       });
     },
     async getCard(customerId: string, membershipId: string): Promise<MembershipCard> {
       const card = await readMembership(db, membershipId, { customerId });
-      const { rows } = await db.query<{ channel: 'sms' | 'whatsapp'; opted_in: boolean }>(
-        'SELECT DISTINCT ON(channel) channel,opted_in FROM consents WHERE membership_id=$1 ORDER BY channel,sequence DESC',
+      const { rows } = await db.query<{
+        channel: string;
+        opted_in: boolean;
+        created_at: Date;
+      }>(
+        'SELECT DISTINCT ON(channel) channel,opted_in,created_at FROM consents WHERE membership_id=$1 ORDER BY channel,sequence DESC',
         [membershipId],
       );
       card.consents = { sms: false, whatsapp: false };
-      for (const row of rows) card.consents[row.channel] = row.opted_in;
+      for (const row of rows)
+        if (row.channel === 'sms' || row.channel === 'whatsapp')
+          card.consents[row.channel] = row.opted_in;
+      const member = (
+        await db.query<{ contact_email: string | null }>(
+          'SELECT contact_email FROM memberships WHERE id=$1 AND customer_id=$2',
+          [membershipId, customerId],
+        )
+      ).rows[0];
+      const emailConsent = rows.find((row) => row.channel === 'email');
+      card.newsletter = {
+        email: member?.contact_email || null,
+        optedIn: emailConsent?.opted_in === true,
+        updatedAt: emailConsent ? new Date(emailConsent.created_at).toISOString() : null,
+      };
       return card;
     },
     async createRedemptionChallenge(
@@ -230,13 +260,13 @@ export function createCustomerService(db: Database, options = { development: fal
     async updatePreferences(
       customerId: string,
       membershipId: string,
-      preferences: { sms: boolean; whatsapp: boolean },
+      preferences: { sms: boolean; whatsapp: boolean; email?: boolean },
     ) {
       const card = await readMembership(db, membershipId, { customerId });
       await db.transaction(async (tx) => {
         await tx.query('SELECT id FROM shops WHERE id=$1 FOR UPDATE', [card.shopId]);
-        const member = await tx.query(
-          "SELECT id FROM memberships WHERE id=$1 AND customer_id=$2 AND status='active' FOR UPDATE",
+        const member = await tx.query<{ id: string; contact_email: string | null }>(
+          "SELECT id,contact_email FROM memberships WHERE id=$1 AND customer_id=$2 AND status='active' FOR UPDATE",
           [membershipId, customerId],
         );
         if (!member.rows.length) throw new Error('Membership not found or access denied.');
@@ -248,10 +278,17 @@ export function createCustomerService(db: Database, options = { development: fal
         ).rows[0];
         if (!person?.phone && (preferences.sms || preferences.whatsapp))
           throw new Error('Phone contact preferences are unavailable for this account.');
+        if (preferences.email === true && !member.rows[0].contact_email)
+          throw new Error('Provide your email address before choosing email newsletters.');
         for (const channel of ['sms', 'whatsapp'] as const)
           await tx.query(
             'INSERT INTO consents(id,membership_id,channel,opted_in) VALUES($1,$2,$3,$4)',
             [id(), membershipId, channel, preferences[channel] === true],
+          );
+        if (typeof preferences.email === 'boolean')
+          await tx.query(
+            "INSERT INTO consents(id,membership_id,channel,opted_in,wording_version) VALUES($1,$2,'email',$3,$4)",
+            [id(), membershipId, preferences.email, newsletterWordingVersion],
           );
         await auditEvent(tx, card.shopId, customerId, 'preferences.updated', membershipId);
       });

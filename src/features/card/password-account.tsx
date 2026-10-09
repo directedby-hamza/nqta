@@ -20,6 +20,9 @@ export function PasswordAccount({
   onNameChange,
   onAuthenticated,
   contacts,
+  shopName,
+  newsletter,
+  onNewsletterChange,
   authenticated = false,
   enrolmentAvailable = true,
 }: {
@@ -28,6 +31,9 @@ export function PasswordAccount({
   onNameChange: (name: string) => void;
   onAuthenticated: (saveContacts?: boolean) => Promise<void>;
   contacts: ShopContacts;
+  shopName: string;
+  newsletter: boolean;
+  onNewsletterChange: (newsletter: boolean) => void;
   authenticated?: boolean;
   enrolmentAvailable?: boolean;
 }) {
@@ -62,9 +68,11 @@ export function PasswordAccount({
     try {
       if (hasSession || mode === 'create') {
         if (!enrolmentAvailable) throw new Error('This shop is not accepting new cards right now.');
+        if (!name.trim() || name.trim().length > 100)
+          throw new Error('Enter your full name, up to 100 characters.');
         const phone = normaliseCustomerLoginPhone(contacts.phone);
-        if (contacts.email.trim() && !z.email().max(200).safeParse(contacts.email.trim()).success)
-          throw new Error('Enter a valid email address or leave it empty.');
+        if (!z.email().max(200).safeParse(contacts.email.trim()).success)
+          throw new Error('Enter a valid email address.');
         if (!hasSession) {
           await api('auth/customer/register', { method: 'POST', body: { phone, password } });
           // Keep the authenticated account if enrolment or navigation needs a retry.
@@ -117,6 +125,18 @@ export function PasswordAccount({
           {hasSession || mode === 'create' ? (
             <>
               <div className="field">
+                <label htmlFor="customer-full-name">Full name</label>
+                <input
+                  id="customer-full-name"
+                  autoComplete="name"
+                  value={name}
+                  onChange={(e) => onNameChange(e.target.value)}
+                  maxLength={100}
+                  placeholder="Your name"
+                  required
+                />
+              </div>
+              <div className="field">
                 <label htmlFor="customer-phone">Phone number</label>
                 <input
                   id="customer-phone"
@@ -132,6 +152,24 @@ export function PasswordAccount({
                   {hasSession
                     ? 'Shared with this shop as an unverified contact number.'
                     : 'Use 06 / 07, or an international number. Your password protects your account.'}
+                </small>
+              </div>
+              <div className="field">
+                <label htmlFor="customer-email">Email address</label>
+                <input
+                  id="customer-email"
+                  type="email"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  value={contacts.email}
+                  onChange={(e) => contacts.onEmailChange(e.target.value)}
+                  maxLength={200}
+                  placeholder="you@example.com"
+                  required
+                />
+                <small>
+                  Your name and contact details are shared with {shopName} for your card.
                 </small>
               </div>
               {!hasSession && (
@@ -161,41 +199,19 @@ export function PasswordAccount({
                   <small>At least 10 characters. Save it in your phone’s password manager.</small>
                 </div>
               )}
-              <details className="join-terms" style={{ marginBottom: 18 }}>
-                <summary>Your details (optional)</summary>
-                <div className="field" style={{ marginTop: 16 }}>
-                  <label htmlFor="first-name">
-                    First name <span className="muted">(optional)</span>
-                  </label>
-                  <input
-                    id="first-name"
-                    autoComplete="given-name"
-                    value={name}
-                    onChange={(e) => onNameChange(e.target.value)}
-                    maxLength={100}
-                    placeholder="How should we say hello?"
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="customer-email">
-                    Email address <span className="muted">(optional)</span>
-                  </label>
-                  <input
-                    id="customer-email"
-                    type="email"
-                    autoComplete="email"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    value={contacts.email}
-                    onChange={(e) => contacts.onEmailChange(e.target.value)}
-                    maxLength={200}
-                    placeholder="you@example.com"
-                  />
-                </div>
-                <small>
-                  Your details are shared with this shop. No promotional messages are enabled.
-                </small>
-              </details>
+              <label className="checkbox">
+                <input
+                  id="customer-newsletter"
+                  type="checkbox"
+                  checked={newsletter}
+                  onChange={(e) => onNewsletterChange(e.target.checked)}
+                />
+                I’d like email news and offers from {shopName}
+              </label>
+              <p className="subtle">
+                Optional. Your card and rewards work without subscribing. Change this choice in your
+                card settings anytime.
+              </p>
             </>
           ) : (
             <>

@@ -2,7 +2,11 @@ import { after, NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDatabase } from '@/server/db/client';
 import { createAuthService } from '@/server/auth/staff';
-import { createCustomerService, joinContactsSchema } from '@/server/auth/customer';
+import {
+  createCustomerService,
+  joinContactsSchema,
+  joinProfileSchema,
+} from '@/server/auth/customer';
 import {
   createCustomerPasswordService,
   CustomerCredentialError,
@@ -38,7 +42,11 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 const text = z.string().trim().min(1).max(200);
 const key = z.string().min(8).max(128);
-const consent = z.object({ sms: z.boolean(), whatsapp: z.boolean() });
+const consent = z.object({
+  sms: z.boolean(),
+  whatsapp: z.boolean(),
+  email: z.boolean().optional(),
+});
 class HttpError extends Error {
   constructor(
     message: string,
@@ -459,18 +467,21 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       const input = z
         .object({
           programmeId: text,
-          name: z.string().max(100),
+          name: z.string().max(100).optional(),
           consents: consent,
           contacts: joinContactsSchema.optional(),
+          profile: joinProfileSchema.optional(),
         })
         .parse(body);
       return json(
         await customers.joinProgramme(
           await customer(),
           input.programmeId,
-          input.name,
+          input.profile?.fullName ?? input.name ?? '',
           input.consents,
-          input.contacts,
+          input.profile
+            ? { phone: input.profile.phone, email: input.profile.email }
+            : input.contacts,
         ),
       );
     }
@@ -555,6 +566,14 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
           request.nextUrl.searchParams.get('query') || '',
         ),
       );
+    if (route === 'customers/newsletter-export' && method === 'GET')
+      return new NextResponse(await reporting.exportNewsletter(await actor(true)), {
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="nqta-newsletter.csv"',
+          'Cache-Control': 'no-store',
+        },
+      });
     if (route === 'activity' && method === 'GET')
       return json(
         await reporting.listActivity(
