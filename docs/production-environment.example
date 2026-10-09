@@ -26,7 +26,8 @@ BACKUP_ENCRYPTION_KEY=GENERATE_32_RANDOM_BYTES_AS_BASE64
 NODE_VERSION=24.21.0
 NPM_FLAGS=--include=dev
 
-# Optional native Wallet integrations; enable each only with real credentials.
+# Native Wallet is deferred and disabled in application code.
+# These legacy settings alone do not enable issuance or delivery.
 # The Wallet auth secret must differ from SESSION_SECRET.
 # GOOGLE_WALLET_ISSUER_ID=
 # GOOGLE_WALLET_SERVICE_ACCOUNT_BASE64=

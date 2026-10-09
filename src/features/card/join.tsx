@@ -9,7 +9,6 @@ import type { Shop, Programme } from '@/lib/types';
 import { ErrorNotice, Loading, Reveal } from '@/components/ui/primitives';
 import { Logo } from '@/components/layout/merchant-shell';
 import { PasswordAccount, type CustomerAccountMode } from './password-account';
-import { walletDestination } from './wallet-actions';
 export function Join({
   slug,
   initialAccountMode,
@@ -19,7 +18,6 @@ export function Join({
 }) {
   const config = useResource<{
     authMode: 'verified-contact' | 'recovery-key';
-    wallet?: { apple: boolean; google: boolean };
   }>('public/config');
   const keyMode = config.data?.authMode === 'recovery-key';
   const { data, error, loading } = useResource<{
@@ -42,11 +40,10 @@ export function Join({
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
   const [savedMembershipId, setSavedMembershipId] = useState('');
-  const [walletDownloadStarted, setWalletDownloadStarted] = useState(false);
   const savedCardHref = savedMembershipId
     ? `/card/${savedMembershipId}?shop=${encodeURIComponent(slug)}`
     : undefined;
-  async function openCard(saveToAppleWallet?: boolean) {
+  async function openCard(saveContacts?: boolean) {
     let membershipId = savedMembershipId;
     if (!membershipId) {
       const member = await api<{ id: string }>('join', {
@@ -54,7 +51,7 @@ export function Join({
         body: {
           programmeId: data?.programme?.id,
           name,
-          ...(saveToAppleWallet !== undefined && phone && email
+          ...(saveContacts && phone && email
             ? { contacts: { phone: phone.trim(), email: email.trim() } }
             : {}),
           consents: { sms: false, whatsapp: false },
@@ -62,21 +59,6 @@ export function Join({
       });
       membershipId = member.id;
       setSavedMembershipId(membershipId);
-    }
-    if (saveToAppleWallet && config.data?.wallet?.apple) {
-      const pass = await api<{ url: string }>('wallet/apple', {
-        method: 'POST',
-        body: { membershipId },
-      });
-      const destination = walletDestination('apple', pass.url, membershipId);
-      setWalletDownloadStarted(true);
-      try {
-        window.location.assign(destination);
-      } catch (error) {
-        setWalletDownloadStarted(false);
-        throw error;
-      }
-      return;
     }
     router.push(`/card/${membershipId}?shop=${encodeURIComponent(slug)}`);
   }
@@ -179,31 +161,15 @@ export function Join({
                   This shop is not accepting enrolments right now. Please check with the team.
                 </div>
               ) : keyMode ? (
-                walletDownloadStarted && savedCardHref ? (
-                  <div className="stack" role="status">
-                    <h3>Your card is ready.</h3>
-                    <p className="subtle">On iPhone, confirm Add in Apple Wallet.</p>
-                    <p className="subtle">
-                      Your loyalty membership is saved. You can also open your card here to see your
-                      points and show its QR at checkout.
-                    </p>
-                    <Link href={savedCardHref} className="button primary wide">
-                      Open my saved card
-                      <ArrowRight size={15} />
-                    </Link>
-                  </div>
-                ) : (
-                  <PasswordAccount
-                    initialMode={initialAccountMode}
-                    name={name}
-                    onNameChange={setName}
-                    onAuthenticated={openCard}
-                    contacts={{ phone, email, onPhoneChange: setPhone, onEmailChange: setEmail }}
-                    enrollmentShop={slug}
-                    saveToAppleWallet={config.data?.wallet?.apple === true}
-                    savedCardHref={savedCardHref}
-                  />
-                )
+                <PasswordAccount
+                  initialMode={initialAccountMode}
+                  name={name}
+                  onNameChange={setName}
+                  onAuthenticated={openCard}
+                  contacts={{ phone, email, onPhoneChange: setPhone, onEmailChange: setEmail }}
+                  enrollmentShop={slug}
+                  savedCardHref={savedCardHref}
+                />
               ) : !challenge ? (
                 <form onSubmit={request}>
                   <div className="field">

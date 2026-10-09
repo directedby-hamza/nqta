@@ -8,11 +8,9 @@ import { api, ApiError, message } from '@/lib/api';
 import { ErrorNotice, Loading, Modal, QR, Reveal, Toast } from '@/components/ui/primitives';
 import { Logo } from '@/components/layout/merchant-shell';
 import { useResource } from '@/lib/use-resource';
-import { WalletActions } from './wallet-actions';
 export function CustomerCard({ id }: { id: string }) {
   const config = useResource<{
     authMode: 'verified-contact' | 'recovery-key';
-    wallet?: { google: boolean; apple: boolean };
   }>('public/config');
   const keyMode = config.data?.authMode === 'recovery-key';
   const [card, setCard] = useState<MembershipCard | null>(null);
@@ -226,11 +224,6 @@ export function CustomerCard({ id }: { id: string }) {
               </div>
               <QR value={card.memberCode} size={116} />
             </div>
-            <WalletActions
-              membershipId={id}
-              options={config.data?.wallet}
-              active={card.status === 'active'}
-            />
             <div className="card-rewards">
               <div className="between">
                 <h2>Your little rewards</h2>
@@ -288,9 +281,11 @@ export function CustomerCard({ id }: { id: string }) {
               <p>
                 Earned rewards do not expire automatically. A reward-only receipt does not earn a
                 stamp.{' '}
-                {card.phone
-                  ? 'Lost your card? Verify the same phone on the shop enrolment page.'
-                  : 'Lost your card? Use your account ID and password on the shop enrolment page, or use your saved recovery key.'}
+                {keyMode
+                  ? 'Lost your card? Use your account ID and password on the shop enrolment page, or use your saved recovery key.'
+                  : card.phone
+                    ? 'Lost your card? Verify the same phone on the shop enrolment page.'
+                    : 'Lost your card? Sign in through your shop to recover your card.'}
               </p>
             </details>
             <div className="card-saved">

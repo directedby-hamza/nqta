@@ -46,7 +46,7 @@ Hosted testing explicitly uses `HOSTED_TEST_MODE=true` with `NODE_ENV=production
 - Responsive landing, merchant dashboard, customers, activity, cashier, programme and settings screens.
 - Mode-aware password/key or phone enrolment and recovery, an authenticated mobile card, opaque member QR, stamp progress, rewards and deduplicated deletion-request intake. Key accounts have no verified phone and cannot enable phone contact preferences.
 - On-demand camera scanning with manual member-code entry when camera access is unavailable.
-- Native Wallet issuance with customer ownership checks, privacy-safe pass contents, durable progress updates and Apple device refresh callbacks. A saved Wallet QR earns while the customer browser is signed out; reward confirmation retains its existing protection.
+- Customers open their saved web card and show its opaque QR to the cashier. Native Apple/Google Wallet is deferred: customer actions are removed and server issuance, downloads, callbacks and delivery stay disabled, even if provider credentials exist. Existing accounts, cards and ledger data remain intact.
 - Review and confirmation of purchases with exact MAD amounts. Interrupted purchase/redemption confirmations survive dialog closure and browser reload; choose **Resume pending confirmation** to resolve the original action before recording another receipt. Optional receipt references prevent duplicate receipts.
 - Single-use reward redemption with a two-minute customer code and five-attempt limit.
 - Reasoned owner reversals, revoked unused entitlements, and reconciliation flags when a refund affects an enjoyed reward.

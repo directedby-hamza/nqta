@@ -1,7 +1,7 @@
 import { after, type NextRequest } from 'next/server';
 import { getDatabase } from '@/server/db/client';
 import { testAccessResponse } from '@/server/test-access';
-import { appleWalletOptions } from '@/server/wallet/apple';
+import { walletOptions } from '@/server/wallet/options';
 import { createAppleWebService } from '@/server/wallet/apple-web-service';
 import { flushWalletUpdates } from '@/server/wallet/delivery';
 
@@ -11,7 +11,7 @@ export const maxDuration = 60;
 async function handle(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const denied = testAccessResponse(request);
   if (denied) return denied;
-  if (!appleWalletOptions())
+  if (!walletOptions().apple)
     return Response.json(
       { error: 'Wallet is unavailable right now. Please try again later.' },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },

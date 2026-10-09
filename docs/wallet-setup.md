@@ -1,6 +1,8 @@
 # Native Wallet cards
 
-Customers enrol once and choose Add to Google Wallet or Add to Apple Wallet. On repeat earning visits, they show the saved QR to the cashier without opening Nqta or signing in. The cashier uses the existing camera scanner or enters the visible member code. No companion mobile application is required. Rewards retain the customer confirmation code: open the Nqta card from the Wallet pass to request it.
+**Deferred on 9 October 2026 at the founder's request.** The current product uses saved web cards. Customer Wallet actions are removed; server issuance, downloads, callbacks and delivery are disabled even with valid credentials. No Smartix runtime integration or migration was activated, and no customer membership was issued through it. Existing accounts and loyalty records are preserved.
+
+The adapter documentation below is historical implementation material for a possible later feature. It does not describe the currently available customer journey.
 
 The implementation uses real provider formats. Provider account approval, credentials, public deployment and physical-phone installation are separate activation steps. Neither provider is currently configured in the project's private environment. The protected synthetic Netlify deployment is preserved; Wallet actions are disabled in `HOSTED_TEST_MODE`, because Google's public images and Apple's native callbacks cannot use its browser Basic password.
 
@@ -17,6 +19,8 @@ The service creates stable per-shop LoyaltyClass and per-membership LoyaltyObjec
 The customer Add action uses Google's unmodified English primary SVG, with the official condensed SVG on narrow screens. The artwork keeps its proportions, minimum height and clear space; loading feedback appears separately. Sources and conditions are in [Google's brand guidelines](https://developers.google.com/wallet/retail/loyalty-cards/resources/brand-guidelines). Apple's action uses ordinary editorial text rather than licensed badge artwork.
 
 ## Apple Wallet
+
+The following steps describe the deferred local signing adapter. External shared-signing probes succeeded, but their limited allowances did not meet the founder's current zero-payment product requirement. The research and limits are recorded in [Apple Wallet shared signing](apple-wallet-shared-signing.md); this provider work is paused.
 
 1. Use an existing eligible Apple Developer account to create the Nqta Pass Type ID and its certificate, following [Apple's Wallet certificate instructions](https://developer.apple.com/help/account/capabilities/create-wallet-identifiers-and-certificates/). Record the exact Pass Type ID and ten-character Team ID. Account eligibility and any membership cost are external prerequisites; this implementation does not enrol or purchase a membership.
 2. Keep the matching certificate and private RSA key privately, export each as PEM, and obtain the corresponding WWDR intermediate from [Apple's certificate authority](https://www.apple.com/certificateauthority/). The app validates their signature chain against embedded public Apple roots, validity dates, matching key, certificate type, Pass Type ID and Team ID. Synthetic or self-signed certificates cannot enable the production provider.

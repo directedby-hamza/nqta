@@ -2,20 +2,32 @@
 
 The real account version of Nqta is published at **[https://nqta-hamza.netlify.app](https://nqta-hamza.netlify.app)**. It uses customer/staff passwords and saved recovery keys, with demo/test modes disabled and a separate production database. Live readiness and 14 real production account/loyalty checks passed. Temporary verification records were cleaned. Native Google/Apple Wallet activation and physical-phone verification remain incomplete; this deployment does not establish that all SaaS launch requirements are finished.
 
-## Published source and host
+## Latest Atlas enrollment upgrade
 
-| Evidence | Result |
-| --- | --- |
-| Host | New Netlify Free project `nqta-hamza` |
-| Netlify site ID | `34d83fd2-ea28-4209-927c-38a1bb441918` |
-| Production deployment | `6ac7b389ce5f7f64d4296f5e`, Published |
-| Deployed Git source | `feat/native-wallet-cards@e946dcd8e89276e3e1a7dadf9e4190bd3ea92e65` |
-| Host build | Build, function and edge deployment completed in 71 seconds |
-| Imported local snapshot | `cf46718266071e6d077982cc9d6ecf3bef95b006`; 179 source blobs and modes independently matched |
-| Branch-only import | GitHub workflow run `37798381595`, success in 12 seconds |
-| Remote main preserved | `19a5730a4f17eb80df358edf9851948b53326f05` |
-| Earlier test preserved | [nqta-hamza-test.netlify.app](https://nqta-hamza-test.netlify.app), original protected synthetic site/database unchanged |
-| Spending | No paid service, payment card, subscription or Apple enrollment added |
+The current published deployment is **`6ac7ca5ebd1cae000827e761`**, from **`feat/native-wallet-cards@aa3afd9e3db0e37ac30e54668ece4318b8bf4887`**. It imports local snapshot **`175b3dad6d3c52443645e74a27a3a7ad41447a18`**. Workflow run **`37812192893`** succeeded; independent Git tree comparison matched all **184 source blobs and modes**, preserved the reviewed import helper and confirmed the source ZIP was removed. Main remains `19a5730a4f17eb80df358edf9851948b53326f05`. Intermediate archive/helper commits used Netlify’s documented `[skip netlify]` marker; the final source commit deployed normally.
+
+[Atlas Coffee — Marrakech](https://nqta-hamza.netlify.app/join/atlas-coffee) is the founder-authorized imaginary shop retained for phone/computer testing. [Its public QR](https://nqta-hamza.netlify.app/shops/atlas-coffee-join-qr.png) returned HTTP 200 and exactly matched the local 7,877-byte PNG, SHA-256 `abca84a1abd8b775adce7a6977974f75315a4fb4cfd49542ceeb1770a340fb74`. The public mobile page exposes required phone/email/private-password fields and **Save my card** without horizontal overflow. The shop is explicitly fictional and its privacy email is an identified, non-deliverable placeholder; it is not a commercial merchant launch.
+
+A real production journey on 8 October, 16:57:16–16:58:00 UTC, passed **11/11 checks**, exit 0, with no errors. Actual registration/enrollment stored normalized declared contacts on the membership while `customers.phone` remained NULL. The saved card returned zero points, the saved greeting name and the member QR. Signed-out/fresh callers received 401; password sign-in restored the same card. Production migrations are now **1–5**. Both native Wallet providers remain false in the public configuration, with demo/test modes disabled.
+
+Cleanup removed only this run’s disposable customer, membership, two consent rows, audit row, password credentials and owned sign-in limit. Atlas’s owner, published programme, existing memberships and economic records were preserved. No purchase/reward/ledger record was added to Atlas. Evidence is retained locally in `nqta-atlas-live-verification-report.json`, `nqta-atlas-deployment-guard-report.json` and the public-only 390px screenshot `nqta-atlas-live-public-join-mobile.png`. No private authentication/recovery screenshot was taken. The founder’s actual browser was signed into Atlas’s owner account and left on **/cashier** for the requested computer-side walkthrough; credentials remain private and gitignored.
+
+The final source passed **364/364 unit/integration tests**, **11 local browser checks** (three password/recovery, seven Wallet, one verified-contact journey), strict TypeScript and the production Webpack build. Independent review cleared the interrupted enrollment and same-page pass download fixes. Browser provider mocks verify handoff/completion behavior; they do not establish native installation. The current Apple account still reports Access Unavailable, and the targeted public-certificate-only check found zero existing Pass Type certificates. No paid enrollment, card or service was added. See [the complete Atlas steps](atlas-coffee-wallet-flow.md).
+
+## Original publication evidence
+
+| Evidence                | Result                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Host                    | New Netlify Free project `nqta-hamza`                                                                                    |
+| Netlify site ID         | `34d83fd2-ea28-4209-927c-38a1bb441918`                                                                                   |
+| Production deployment   | `6ac7b389ce5f7f64d4296f5e`, Published                                                                                    |
+| Deployed Git source     | `feat/native-wallet-cards@e946dcd8e89276e3e1a7dadf9e4190bd3ea92e65`                                                      |
+| Host build              | Build, function and edge deployment completed in 71 seconds                                                              |
+| Imported local snapshot | `cf46718266071e6d077982cc9d6ecf3bef95b006`; 179 source blobs and modes independently matched                             |
+| Branch-only import      | GitHub workflow run `37798381595`, success in 12 seconds                                                                 |
+| Remote main preserved   | `19a5730a4f17eb80df358edf9851948b53326f05`                                                                               |
+| Earlier test preserved  | [nqta-hamza-test.netlify.app](https://nqta-hamza-test.netlify.app), original protected synthetic site/database unchanged |
+| Spending                | No paid service, payment card, subscription or Apple enrollment added                                                    |
 
 Production is public; deployment previews are private. The new project is separate from the protected test project and deploys the dedicated Wallet feature branch. The optional Powered by Netlify badge was disabled; the saved project settings confirm that the badge is not shown.
 
@@ -25,19 +37,19 @@ Twelve key entries are stored in Netlify's production-only environment. Configur
 
 Netlify's actual secret-scan result reported **No Secrets Detected**, with zero errors. Public build/configuration values are excluded by key name: `APP_URL`, `NODE_ENV`, `NODE_VERSION`, `NPM_FLAGS`, `HOSTED_TEST_MODE`, `DEMO_MODE`, `AUTH_MODE` and `GOOGLE_WALLET_ISSUER_ID`. Database, session, backup and provider secrets remain subject to scanning.
 
-| Live check | Result |
-| --- | --- |
-| Public sign-in | HTTP 200; no demo action or synthetic-test access gate |
-| Public logo | HTTP 200, PNG |
-| Production `/api/ready` | HTTP 200 |
-| Isolated Neon database | Direct TLS check confirmed the dedicated `nqta_production` database |
-| Migrations | Before initial app readiness: migrations 1/2; readiness applied 3/4 through the normal app path; subsequent direct check confirmed four history entries |
-| Database after readiness | 25 tables, zero business rows; no demo seed imported |
-| Live account/loyalty core journey | 14 real production checks passed, zero errors, exit 0 |
-| Independent economic records | Five purchases, one redemption event, five ledger stamps confirmed through direct PostgreSQL |
-| Verification cleanup | All 23 business/authentication tables restored to zero rows; four migrations and four shared rate-limit rows preserved |
-| Mobile viewport | Fresh 390px public sign-in screenshot visually inspected; no horizontal overflow or Netlify badge |
-| Physical phone, camera and native Wallet | Pending; no installation or physical-device outcome claimed |
+| Live check                               | Result                                                                                                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public sign-in                           | HTTP 200; no demo action or synthetic-test access gate                                                                                                  |
+| Public logo                              | HTTP 200, PNG                                                                                                                                           |
+| Production `/api/ready`                  | HTTP 200                                                                                                                                                |
+| Isolated Neon database                   | Direct TLS check confirmed the dedicated `nqta_production` database                                                                                     |
+| Migrations                               | Before initial app readiness: migrations 1/2; readiness applied 3/4 through the normal app path; subsequent direct check confirmed four history entries |
+| Database after readiness                 | 25 tables, zero business rows; no demo seed imported                                                                                                    |
+| Live account/loyalty core journey        | 14 real production checks passed, zero errors, exit 0                                                                                                   |
+| Independent economic records             | Five purchases, one redemption event, five ledger stamps confirmed through direct PostgreSQL                                                            |
+| Verification cleanup                     | All 23 business/authentication tables restored to zero rows; four migrations and four shared rate-limit rows preserved                                  |
+| Mobile viewport                          | Fresh 390px public sign-in screenshot visually inspected; no horizontal overflow or Netlify badge                                                       |
+| Physical phone, camera and native Wallet | Pending; no installation or physical-device outcome claimed                                                                                             |
 
 The initial zero-row statement describes readiness before the authorized live journey; the cleanup result confirms the database returned to empty business/authentication tables afterward. Automated local results are recorded in [Wallet verification](wallet-verification.md): 350/350 tests, strict TypeScript, the production build and browser/PostgreSQL checks passed for this source. Those automated suites were not rerun against the live production database.
 

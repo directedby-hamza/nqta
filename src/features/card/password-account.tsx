@@ -104,16 +104,14 @@ export function PasswordAccount({
   onAuthenticated,
   contacts,
   enrollmentShop,
-  saveToAppleWallet = false,
   savedCardHref,
 }: {
   initialMode?: CustomerAccountMode;
   name: string;
   onNameChange: (name: string) => void;
-  onAuthenticated: (saveToAppleWallet?: boolean) => Promise<void>;
+  onAuthenticated: (saveContacts?: boolean) => Promise<void>;
   contacts?: ShopContacts;
   enrollmentShop?: string;
-  saveToAppleWallet?: boolean;
   savedCardHref?: string;
 }) {
   const [mode, setMode] = useState<CustomerAccountMode | 'replace-key'>(initialMode);
@@ -184,7 +182,7 @@ export function PasswordAccount({
     if (createdForShop && !validateContacts()) return;
     setBusy(true);
     try {
-      await onAuthenticated(createdForShop ? saveToAppleWallet : undefined);
+      await onAuthenticated(createdForShop ? true : undefined);
       clearPending();
       setDetails(null);
     } catch (e) {
@@ -263,11 +261,7 @@ export function PasswordAccount({
   }
 
   if (details) {
-    const continueLabel = createdForShop
-      ? saveToAppleWallet
-        ? 'Save to Apple Wallet'
-        : 'Save my card'
-      : 'Open my card';
+    const continueLabel = createdForShop ? 'Save my card' : 'Open my card';
     return (
       <div className="stack">
         <h3>Keep your little progress safe.</h3>
@@ -284,13 +278,6 @@ export function PasswordAccount({
           continueLabel={busy ? 'Preparing your card…' : continueLabel}
           onContinue={() => void continueToCard()}
         />
-        {createdForShop && (
-          <p className="subtle">
-            {saveToAppleWallet
-              ? 'On iPhone, confirm Add in Apple Wallet.'
-              : 'Apple Wallet is not available for this shop yet.'}
-          </p>
-        )}
         <ErrorNotice error={error} />
         {error && savedCardHref && (
           <Link href={savedCardHref} className="button quiet wide" onClick={clearPending}>
