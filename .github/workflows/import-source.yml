@@ -1,4 +1,4 @@
-# Snapshot: 175b3dad6d3c52443645e74a27a3a7ad41447a18 (184 tracked source files).
+# Snapshot: 273f52688c4492d2669a589a4d5865a46e0eb7c2 (186 tracked source files).
 # Publish this version only on feat/native-wallet-cards, at .github/workflows/import-source.yml.
 name: Import verified Nqta Wallet source
 
@@ -37,7 +37,7 @@ jobs:
           import zipfile
 
           archive = Path('Nqta-Wallet-Source.zip')
-          expected_hash = 'e16ff9bbae4dae10942a82ccce5216fce3fa63a17e92f2f337d26b12df54fdeb'
+          expected_hash = '02c52f6525c4bed9314423d5266ad1284ca4721a10de29ac2b2a3fb696947f83'
           if hashlib.sha256(archive.read_bytes()).hexdigest() != expected_hash:
               raise SystemExit('Source archive SHA-256 does not match.')
 
@@ -76,8 +76,8 @@ jobs:
                       raise SystemExit('Source file exceeds the expected size limit.')
                   files[relative] = (target, source.read(entry), mode & 0o777)
 
-          if len(files) != 184:
-              raise SystemExit('Expected exactly 184 source files.')
+          if len(files) != 186:
+              raise SystemExit('Expected exactly 186 source files.')
           required = {'package.json', 'package-lock.json', 'render.yaml', 'tsconfig.json', '.env.example'}
           if not required.issubset(files):
               raise SystemExit('Required source files are missing.')
@@ -104,7 +104,7 @@ jobs:
                           '--pathspec-from-file=' + str(manifest), '--pathspec-file-nul'], check=True)
           if subprocess.check_output(['git', 'diff', '--cached', '--name-only', '--', '.github/']):
               raise SystemExit('Workflow files must remain unchanged.')
-          print('Imported and verified all 184 Wallet source files; removed the source archive.')
+          print('Imported and verified all 186 Wallet source files; removed the source archive.')
           PY
 
       - name: Commit and push the imported source
@@ -120,5 +120,5 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'Import verified Atlas enrollment and Wallet source 175b3dad'
+          git commit -m 'Import verified Atlas enrollment and Wallet source 273f5268'
           git push origin HEAD:refs/heads/feat/native-wallet-cards
