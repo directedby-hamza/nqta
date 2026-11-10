@@ -152,6 +152,36 @@ export const migrations: readonly Migration[] = [
  CHECK(login_phone IS NULL OR login_phone ~ '^[+][1-9][0-9]{7,14}$')`,
     ],
   },
+  {
+    version: 7,
+    name: 'platform_administration_and_billing',
+    statements: [
+      `CREATE TABLE platform_admins (
+ id text PRIMARY KEY, email text NOT NULL UNIQUE, name text NOT NULL, password_hash text NOT NULL,
+ active boolean NOT NULL DEFAULT true, must_change_password boolean NOT NULL DEFAULT true,
+ created_at timestamptz NOT NULL DEFAULT NOW())`,
+      `CREATE TABLE platform_admin_sessions (
+ id text PRIMARY KEY, admin_id text NOT NULL REFERENCES platform_admins(id), token_hash text NOT NULL UNIQUE,
+ expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT NOW())`,
+      `CREATE INDEX platform_admin_sessions_admin ON platform_admin_sessions(admin_id)`,
+      `CREATE TABLE shop_billing (
+ shop_id text PRIMARY KEY REFERENCES shops(id), state text NOT NULL DEFAULT 'unreviewed'
+ CHECK(state IN ('unreviewed','pending','active','suspended')), valid_until date,
+ revision integer NOT NULL DEFAULT 0, updated_at timestamptz NOT NULL DEFAULT NOW())`,
+      `INSERT INTO shop_billing(shop_id) SELECT id FROM shops`,
+      `CREATE TABLE platform_payments (
+ id text PRIMARY KEY, shop_id text NOT NULL REFERENCES shops(id), admin_id text NOT NULL REFERENCES platform_admins(id),
+ amount_minor integer NOT NULL CHECK(amount_minor>0 AND amount_minor<=100000000), reference text NOT NULL,
+ note text NOT NULL DEFAULT '', valid_until date NOT NULL, request_key text NOT NULL, fingerprint text NOT NULL,
+ created_at timestamptz NOT NULL DEFAULT NOW(), voided_at timestamptz, void_reason text,
+ voided_by text REFERENCES platform_admins(id), UNIQUE(shop_id,request_key))`,
+      `CREATE INDEX platform_payments_shop ON platform_payments(shop_id,created_at DESC)`,
+      `CREATE TABLE platform_audit (
+ id text PRIMARY KEY, admin_id text NOT NULL REFERENCES platform_admins(id), shop_id text REFERENCES shops(id),
+ action text NOT NULL, details jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT NOW())`,
+      `CREATE INDEX platform_audit_shop ON platform_audit(shop_id,created_at DESC)`,
+    ],
+  },
 ];
 
 function checksum(migration: Migration) {

@@ -36,6 +36,7 @@ import { flushWalletUpdates } from '@/server/wallet/delivery';
 import { googleWalletObjectId, googleWalletSaveUrl } from '@/server/wallet/google';
 import { applePassTypeIdentifier, createAppleWalletPass } from '@/server/wallet/apple';
 import { WalletUnavailableError } from '@/server/wallet/contracts';
+import { assertShopAccess, getShopAccess, ShopAccessError } from '@/server/platform/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -155,7 +156,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       scheduleWalletUpdates();
       return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
     };
-    async function actor(owner = false) {
+    async function actor(owner = false, allowRestricted = false) {
       let current;
       try {
         current = await auth.getStaffActor(request.cookies.get('nqta_staff')?.value || '');
@@ -164,6 +165,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       }
       if (owner && current.role !== 'owner')
         throw new HttpError('This action requires owner access.', 403);
+      if (!allowRestricted) await assertShopAccess(db, current.shopId);
       return current;
     }
     async function customer() {
@@ -494,6 +496,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
         )
       ).rows[0];
       if (!shop) throw new HttpError('This shop could not be found.', 404);
+      const access = await getShopAccess(db, String(shop.id));
       const programme =
         (
           await db.query(
@@ -501,7 +504,12 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
             [shop.id],
           )
         ).rows[0] || null;
-      return json({ shop, programme, isDemo, hostedTest });
+      return json({
+        shop: access.allowed ? shop : { ...shop, status: 'paused' },
+        programme: access.allowed ? programme : null,
+        isDemo,
+        hostedTest,
+      });
     }
     if (route.startsWith('card/') && method === 'GET')
       return json(await customers.getCard(await customer(), route.slice(5)));
@@ -536,7 +544,8 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
       return json({ ok: true });
     }
     if (route === 'workspace' && method === 'GET') {
-      const current = await actor();
+      const current = await actor(false, true);
+      const subscription = await getShopAccess(db, current.shopId);
       const shop = (await db.query('SELECT * FROM shops WHERE id=$1', [current.shopId])).rows[0];
       const programme =
         (
@@ -552,6 +561,7 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
         isDemo: isDemo && current.shopId === 'shop-morrow',
         development: isDemo,
         hostedTest,
+        subscription,
       });
     }
     const reporting = createReportingService(db);
@@ -802,6 +812,11 @@ async function handle(request: NextRequest, context: { params: Promise<{ path: s
           status: 401,
           headers: { 'Cache-Control': 'no-store' },
         },
+      );
+    if (error instanceof ShopAccessError)
+      return NextResponse.json(
+        { error: error.message, subscriptionRequired: true, operationRejected: true },
+        { status: 402, headers: { 'Cache-Control': 'no-store' } },
       );
     if (error instanceof RateLimitError)
       return NextResponse.json(

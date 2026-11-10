@@ -1,4 +1,5 @@
 import type { Database } from '../db/client';
+import { assertShopAccess } from '../platform/access';
 import type { MembershipCard } from '../loyalty/types';
 import { randomBytes, randomInt } from 'node:crypto';
 import { z } from 'zod';
@@ -169,6 +170,7 @@ export function createCustomerService(db: Database, options = { development: fal
           [customerId, programmeId],
         );
         if (previous.rows[0]) return previous.rows[0];
+        await assertShopAccess(tx, shopId, true);
         if (consents.email === true && !declaredContacts?.email)
           throw new Error('Provide your email address before choosing email newsletters.');
         if (productionMode()) await assertMerchantPrivacy(tx, shopId);

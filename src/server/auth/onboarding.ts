@@ -61,6 +61,10 @@ export async function createWorkspace(
         location || 'Casablanca',
       ],
     );
+    await tx.query('INSERT INTO shop_billing(shop_id,state) VALUES($1,$2)', [
+      shopId,
+      live ? 'pending' : 'unreviewed',
+    ]);
     await tx.query(
       "INSERT INTO staff(id,shop_id,name,email,password_hash,role,email_verified,auth_method,recovery_key_hash) VALUES($1,$2,$3,$4,$5,'owner',$6,$7,$8)",
       [

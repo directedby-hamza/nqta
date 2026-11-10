@@ -19,6 +19,8 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "launch:check": "tsx scripts/preflight.ts",
     "db:backup": "tsx scripts/backup.ts",
+    "admin:create": "tsx scripts/create-admin.ts",
+    "test:admin:e2e": "playwright test --config playwright.admin.config.ts",
     "wallet:sync": "tsx scripts/sync-wallet.ts",
     "test:postgres": "tsx scripts/check-postgres.ts"
   },

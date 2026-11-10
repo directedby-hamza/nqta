@@ -66,6 +66,19 @@ beforeAll(async () => {
   );
   await source.query("INSERT INTO verification_limits(phone) VALUES('+212600009001')");
   await source.query("INSERT INTO login_limits(email) VALUES('fixture@example.invalid')");
+  await source.query(
+    "INSERT INTO platform_admins(id,email,name,password_hash,must_change_password) VALUES('backup-admin','backup-admin@example.invalid','Backup admin','synthetic-password-hash',false)",
+  );
+  await source.query(
+    "INSERT INTO platform_admin_sessions(id,admin_id,token_hash,expires_at) VALUES('backup-admin-session','backup-admin','synthetic-admin-session-hash',NOW()+interval '1 hour')",
+  );
+  await source.query("INSERT INTO shop_billing(shop_id,state) VALUES('shop','unreviewed')");
+  await source.query(
+    "INSERT INTO platform_payments(id,shop_id,admin_id,amount_minor,reference,valid_until,request_key,fingerprint) VALUES('backup-payment','shop','backup-admin',19900,'Synthetic receipt','2099-12-31','backup-payment-key','synthetic-fingerprint')",
+  );
+  await source.query(
+    "INSERT INTO platform_audit(id,admin_id,shop_id,action,details) VALUES('backup-admin-audit','backup-admin','shop','payment.recorded','{\"paymentId\":\"backup-payment\"}')",
+  );
 });
 
 afterEach(async () => {

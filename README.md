@@ -43,6 +43,7 @@ Hosted testing explicitly uses `HOSTED_TEST_MODE=true` with `NODE_ENV=production
 
 ## What works
 
+- Private platform administration at `/admin/sign-in`: shop review, received-payment records, reasoned suspension/activation, expiry dates and an administrator audit trail. New production shops need activation. See [platform administration](docs/platform-administration.md); administrator credentials are provisioned privately, separately from shop-owner accounts.
 - Responsive landing, merchant dashboard, customers, activity, cashier, programme and settings screens.
 - Phone/password signup with required full name and email, optional shop newsletter permission, direct authenticated QR cards, remembered shop-link access, 90-day password sessions, downloadable QR images, home-screen guidance, stamp progress, rewards and deletion-request intake. Phone usernames and shop contact declarations are unverified. Email offers require a separate explicit opt-in; phone promotional preferences remain unavailable for unverified-phone accounts. Existing account-ID sign-in and previously issued recovery keys remain compatible.
 - On-demand camera scanning with manual member-code entry when camera access is unavailable.

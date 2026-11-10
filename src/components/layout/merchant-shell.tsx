@@ -103,6 +103,35 @@ export function MerchantShell({ children }: { children: ReactNode }) {
         <ErrorNotice error={error} />
       </div>
     );
+  if (workspace.subscription?.allowed === false)
+    return (
+      <div className="startup">
+        <Logo />
+        <div
+          className="panel"
+          style={{ maxWidth: 520, padding: 32, marginTop: 24, textAlign: 'center' }}
+        >
+          <Store size={32} style={{ margin: '0 auto 20px' }} />
+          <span className="eyebrow">{workspace.shop.name}</span>
+          <h1 style={{ fontSize: 28, margin: '12px 0' }}>Workspace activation required</h1>
+          <p className="muted">
+            {workspace.subscription.status === 'expired'
+              ? 'Your subscription period has ended. Contact Nqta to renew access.'
+              : 'Contact Nqta to activate or renew your workspace.'}
+          </p>
+          <p className="muted">Your customers, cards and activity are saved.</p>
+          <div className="row" style={{ justifyContent: 'center', marginTop: 24 }}>
+            <button className="button" onClick={() => void refresh()}>
+              Check access
+            </button>
+            <button className="button secondary" onClick={() => void signOut()}>
+              Sign out
+            </button>
+          </div>
+          <ErrorNotice error={error} />
+        </div>
+      </div>
+    );
   return (
     <Context.Provider value={{ workspace, refresh }}>
       <div className="app-shell">

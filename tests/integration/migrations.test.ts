@@ -37,7 +37,7 @@ describe('versioned database migrations', () => {
     const before = await db.query(
       'SELECT version,name,checksum,applied_at FROM nqta_schema_migrations ORDER BY version',
     );
-    expect(before.rows).toHaveLength(6);
+    expect(before.rows).toHaveLength(7);
     await migrate(db);
     expect(
       (
@@ -312,6 +312,7 @@ describe('versioned database migrations', () => {
       { version: 4 },
       { version: 5 },
       { version: 6 },
+      { version: 7 },
     ]);
   });
 

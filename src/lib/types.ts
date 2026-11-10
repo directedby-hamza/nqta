@@ -25,6 +25,7 @@ export type Programme = {
   revision: number;
 };
 export type Workspace = {
+  subscription?: import('@/server/platform/access').ShopAccess;
   actor: Actor;
   shop: Shop;
   programme: Programme | null;
